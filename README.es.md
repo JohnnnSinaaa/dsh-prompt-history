@@ -22,6 +22,7 @@
 
 | Superficie | Estado |
 |---|---|
+| Versiones de DSH | **0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1** (perfil web, verificado en ejecución); **0.2.x** (verificado con el preflight de compatibilidad del instalador 0.2.1-alpha.3 y una auditoría de la API de cliente) |
 | Plataforma | Solo Web GUI (plugin de cliente; estado local del navegador; sin red, sin código nativo) |
 | Node | `>=20` |
 | Modelo | Cualquiera (no hace peticiones al modelo — comportamiento de UI puro) |

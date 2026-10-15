@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-history",
-  "version": "1.2.15",
+  "version": "1.2.16",
   "description": "DSH web plugin: terminal-style input for the composer — bash-like Up/Down prompt history with prefix search and Ctrl+R, selection toolbar with copy and quote (Codex-style > blockquote), right-click paste, toggleable draggable chat TOC, fully internationalized (zh/en), with copy modes in Settings (history sourced from the session's own message log; zero config required).",
   "keywords": [
     "dsh",
@@ -47,7 +47,6 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-locale"
       ],
@@ -70,12 +69,11 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-locale": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.2.0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.0-rc.6 <0.3.0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.6 <0.3.0",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.6 <0.3.0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.6 <0.3.0",
+    "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.3.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
