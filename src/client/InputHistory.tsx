@@ -37,10 +37,9 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, useState
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: the ui-conversation SlotMap merge (the input.right entry) and the
 // session standard kit members (useInput/inputActions).
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-// Type-only: the runtime SessionStandardProps merge (useSession/sessionId) and
-// the conversation node union.
-import type { ConversationNode } from '@deepseek-ai/dsh-client-runtime/client'
+import type { InputState } from '@deepseek-ai/dsh-client-ui-conversation/client'
+// Type-only: the ui-session merge (useSession/sessionId) on DSH >= 0.2 layouts.
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { getPrefs, subscribePrefs } from './prefs.ts'
 import {
   flashCopied, hideSearchOverlay, hideSelectionToolbar, showSearchOverlay, showSelectionToolbar,
@@ -129,8 +128,8 @@ export function InputHistory(props: InputHistoryProps) {
   const sessionHook = useSession as SelectorHook | undefined
 
   // Latest machine/session facts at event time (the listeners mount once).
-  const draft = useInput(s => s.draft)
-  const phase = useInput(s => s.phase)
+  const draft = useInput((s: InputState) => s.draft)
+  const phase = useInput((s: InputState) => s.phase)
   // Node shapes differ by DSH generation (old {kind,seq,content} vs 2.0.x
   // chatNode with data.content/anchorSeq, and rc.1's nodes being a store, not
   // an array). rawNodesOf + promptMessage normalize them to {kind, seq, text},

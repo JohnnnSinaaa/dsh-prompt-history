@@ -22,7 +22,8 @@
 
 | Surface | Status |
 |---|---|
-| DSH versions | **0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1** (web profile, run-verified); **0.2.x** (verified with the 0.2.1-alpha.3 official installer compatibility preflight plus a client-API audit); node reading is normalized across generations (old `session.nodes` / 0.1.2+ `legacy.nodes` / newer `order`+store with `data.content`), so desktop 2.0.x is covered too |
+| DSH versions | **One release supports both 0.1.x and 0.2.x** (no per-version plugin switch): 0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1 run-verified; **0.2.0-rc.2 mount-verified live**, 0.2.1-alpha.2 / alpha.3 pass the official installer compatibility preflight. Node reading is normalized across generations (old `session.nodes` / 0.1.2+ `legacy.nodes` / newer `order`+store with `data.content`), so desktop 2.0.x is covered too |
+| Version mapping | **≥ 1.2.16** supports 0.1.x and 0.2.x together (1.2.16 fixed the rejected install on 0.2.1+; 1.2.17 moved types/deps to the 0.2.x package layout while keeping 0.1.x working). **No 1.3.x breaking line exists or is needed** |
 | Platform | Web GUI only (client plugin; browser-local state; no network, no native code) |
 | Node | `>=20` |
 | Model | Any (no model requests — pure UI behavior) |

@@ -4,7 +4,9 @@
  * a settings section with user toggles, internationalized (zh/en follows the
  * DSH app locale).
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: pulls the Context merge (ctx.slots) from the renderer service.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the ui-conversation SlotMap merge (the input.right entry)
 // and the session standard kit members used by the component.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'

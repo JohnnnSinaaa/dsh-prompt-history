@@ -22,7 +22,8 @@
 
 | Superfície | Estado |
 |---|---|
-| Versões do DSH | **0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1** (perfil web, verificado em execução); **0.2.x** (verificado com o preflight de compatibilidade do instalador 0.2.1-alpha.3 e uma auditoria da API de cliente) |
+| Versões do DSH | **Uma mesma versão suporta 0.1.x e 0.2.x** (sem trocar de plugin): 0.1.1-rc.2 / 0.1.2-rc.1 / 0.1.5-rc.1 verificados em execução; **0.2.0-rc.2 verificado ao vivo**, 0.2.1-alpha.2 / alpha.3 passam no preflight oficial do instalador |
+| Correspondência | **≥ 1.2.16** suporta 0.1.x e 0.2.x juntos (1.2.16 corrigiu a instalação rejeitada no 0.2.1+; 1.2.17 migrou tipos/dependências para o layout de pacotes 0.2.x mantendo 0.1.x). **Não existe nem é necessária uma linha 1.3.x** |
 | Plataforma | Somente Web GUI (plugin de cliente; estado local do navegador; sem rede, sem código nativo) |
 | Node | `>=20` |
 | Modelo | Qualquer (não faz requisições ao modelo — comportamento puro de UI) |

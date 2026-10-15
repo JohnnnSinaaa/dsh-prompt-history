@@ -117,6 +117,27 @@ export function ChatToc({ texts, onWiden }: ChatTocProps): JSX.Element {
     } catch { /* corrupt saved position: fall back to the default */ }
   }, [])
 
+  // Re-clamp on layout changes. Dragging the sidebar narrower, collapsing it or
+  // any other reflow moves the scrollport WITHOUT firing a window resize, so a
+  // dragged grip could end up out of bounds (or hidden under the sidebar).
+  // Observing the scrollport re-measures the anchor and pulls the saved
+  // position back inside the viewport on every reflow.
+  useEffect(() => {
+    const scrollport = document.querySelector<HTMLElement>('[data-conversation-scroll]')
+    if (scrollport === null) return
+    const observer = new ResizeObserver(() => {
+      measure()
+      setPos((current) => {
+        if (current === null) return current
+        const left = Math.min(Math.max(4, current.left), Math.max(4, window.innerWidth - 24))
+        const top = Math.min(Math.max(4, current.top), Math.max(4, window.innerHeight - 56))
+        return left === current.left && top === current.top ? current : { left, top }
+      })
+    })
+    observer.observe(scrollport)
+    return () => { observer.disconnect() }
+  }, [measure])
+
   // Close on outside pointer-down and Escape (the panel).
   useEffect(() => {
     if (!open) return
