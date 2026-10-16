@@ -112,6 +112,7 @@ export function SettingsSection({ t }: PropsLocale<'dsh-prompt-history'>): JSX.E
       <p className="dsh-ph-note">{t('sideChat.note')}</p>
 
       <p className="dsh-ph-note">{t('bridge.label')}：{bridgeReady ? t('bridge.on') : t('bridge.off')}</p>
+      <p className="dsh-ph-note">{t('suggest.keys')}</p>
       <p className="dsh-ph-note">{t('settings.note')}</p>
     </div>
   )

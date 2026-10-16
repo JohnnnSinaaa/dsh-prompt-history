@@ -18,7 +18,7 @@ import { matchCompletion } from './completion.ts'
 import { prefixMatches, RESET_BROWSE, stepPrefix, type BrowseState } from './browse.ts'
 import { getPrefs, subscribePrefs } from './prefs.ts'
 import { getActiveBridge, subscribeBridge } from './suggest.ts'
-import { hideSuggestion, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
+import { hideSuggestion, showPending, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
 import { T } from './i18n.ts'
 
 /** Props of the panel composer. */
@@ -82,8 +82,10 @@ export function PromptComposer(props: PromptComposerProps): JSX.Element {
     abortRef.current = controller
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null
+      showPending(T('suggest.pending'), area, { hidePlaceholder: false })
       void bridge.fetch(context, controller.signal).then((text) => {
-        if (controller.signal.aborted || text === '') return
+        if (controller.signal.aborted) return
+        if (text === '') { hideSuggestion(); return }
         predictionRef.current = text
         showSuggestion(text, T('suggest.accept'), area, { hidePlaceholder: false })
       })
@@ -144,6 +146,12 @@ export function PromptComposer(props: PromptComposerProps): JSX.Element {
       }
       browseRef.current = stepped.state
       onChange(stepped.text)
+      return
+    }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.code === 'Space' || event.key === ' ')) {
+      event.preventDefault()
+      dismissedRef.current = null
+      requestPrediction()
       return
     }
     if (event.key === 'Escape') {

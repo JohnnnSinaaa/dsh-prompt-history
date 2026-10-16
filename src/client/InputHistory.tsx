@@ -55,7 +55,7 @@ import { completionEligible, matchCompletion } from './completion.ts'
 import { ghostVisible, hideGhost, showGhost } from './ghost.ts'
 import { buildContext, getActiveBridge } from './suggest.ts'
 import { insertIntoMain, quoteBlock, registerMainInserter, sendToSideChat } from './bridge.ts'
-import { hideSuggestion, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
+import { hideSuggestion, showPending, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
 import { ChatToc } from './ChatToc.tsx'
 
 /** Full props of the input-history entry: framework standard kit + owner share. */
@@ -318,6 +318,8 @@ export function InputHistory(props: InputHistoryProps) {
         if (cached.text !== '') showSuggestion(cached.text, T('suggest.accept'), host)
         return
       }
+      // Tell the user something is happening; the prediction replaces this line.
+      showPending(T('suggest.pending'), host)
       void bridge.fetch(context, controller.signal).then((text) => {
         suggestPendingRef.current = false
         if (controller.signal.aborted) return
@@ -328,6 +330,7 @@ export function InputHistory(props: InputHistoryProps) {
         // models occasionally spend the whole budget thinking, so one silent
         // retry is allowed per context before giving up on it.
         if (text === '') {
+          hideSuggestion()
           if (emptyTriesRef.current < 2) {
             emptyTriesRef.current += 1
             attempt()
@@ -549,6 +552,19 @@ export function InputHistory(props: InputHistoryProps) {
       }
 
       // ---- Ctrl+R: start reverse search, or step to the older match ----
+      // Ctrl/Cmd+Shift+Space: predict now. The automatic pass only fires when an
+      // empty composer gains focus or a turn ends, so a dismissed (or slow)
+      // prediction otherwise has no way back.
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.code === 'Space' || e.key === ' ')) {
+        if (live.draft !== '' || live.phase !== 'plain' || live.removed) return
+        e.preventDefault()
+        e.stopPropagation()
+        suggestDismissedRef.current = null
+        suggestPendingRef.current = false
+        hideSuggestion()
+        requestSuggestion()
+        return
+      }
       if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
         const active = searchRef.current
         if (active !== null) {

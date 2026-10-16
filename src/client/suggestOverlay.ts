@@ -29,6 +29,8 @@ interface Painted {
   readonly hint: string
   readonly host: HTMLElement
   readonly hidePlaceholder: boolean
+  /** Informational copy (a request is in flight): dimmed, and never hints a key. */
+  readonly pending?: boolean
 }
 
 /**
@@ -101,6 +103,7 @@ function ensureStyle(): void {
     `.${CLASS}{position:fixed;z-index:2147482000;pointer-events:none;overflow:hidden;`,
     'white-space:pre-wrap;word-break:break-word;}',
     `.${CLASS} .dsh-ph-suggest-text{color:var(--dsw-alias-label-primary);opacity:.42;}`,
+    `.${CLASS}--pending .dsh-ph-suggest-text{opacity:.26;font-style:italic;}`,
     `.${CLASS} .dsh-ph-suggest-hint{color:var(--dsw-alias-label-primary);opacity:.3;}`,
     `.${CLASS} .dsh-ph-suggest-hint--block{display:block;}`,
     // The composer's own hint must not sit under the prediction.
@@ -170,14 +173,15 @@ function paint(): boolean {
   if (box === null) return false
   const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
   const style = window.getComputedStyle(card ?? painted.host)
+  el.classList.toggle(`${CLASS}--pending`, painted.pending === true)
   const textEl = document.createElement('span')
   textEl.className = 'dsh-ph-suggest-text'
   textEl.textContent = painted.text
   const hintEl = document.createElement('span')
   hintEl.className = 'dsh-ph-suggest-hint'
   // The prediction may itself mention Tab (the conversation talks about it);
-  // never repeat the hint in that case.
-  const showHint = painted.hint !== '' && !/tab/i.test(painted.text)
+  // never repeat the hint in that case. A pending line never carries one.
+  const showHint = painted.pending !== true && painted.hint !== '' && !/tab/i.test(painted.text)
   // A block hint needs a second line of room inside the composer.
   const block = box.height >= box.line * 2.1
   if (!showHint) {
@@ -198,6 +202,40 @@ function paint(): boolean {
   el.style.height = `${box.height}px`
   el.style.lineHeight = `${box.line}px`
   hintEl.style.fontSize = `${Math.max(10, (Number.parseFloat(style.fontSize) || 14) - 2)}px`
+  return true
+}
+
+/**
+ * Show progress in the composer while a request is in flight.
+ *
+ * Waiting in silence is what makes a probabilistic feature feel broken: the
+ * prediction can take a few seconds, and an empty composer shows nothing at all
+ * until it lands. The pending line uses the same overlay (and the same
+ * self-correcting geometry), so the real prediction simply replaces it.
+ * @param host - the composer editor host to align against.
+ * @param host2 - unused placeholder kept for symmetry with showSuggestion.
+ * @returns whether the pending line is on screen.
+ */
+export function showPending(text: string, host: HTMLElement, options: ShowSuggestionOptions = {}): boolean {
+  if (text === '') return false
+  if (editorText(host).trim() !== '') return false
+  const box = editorBox(host)
+  if (box === null) return false
+  ensureStyle()
+  const hidePlaceholder = options.hidePlaceholder !== false
+  if (hidePlaceholder) hidePlaceholders()
+  if (node === null) {
+    node = document.createElement('div')
+    node.className = CLASS
+    node.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(node)
+  }
+  current = { text, hint: '', host, hidePlaceholder, pending: true }
+  if (!paint()) {
+    hideSuggestion()
+    return false
+  }
+  startTick()
   return true
 }
 
