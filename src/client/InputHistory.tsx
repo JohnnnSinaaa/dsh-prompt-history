@@ -53,6 +53,8 @@ import {
 } from './editor.ts'
 import { completionEligible, matchCompletion } from './completion.ts'
 import { ghostVisible, hideGhost, showGhost } from './ghost.ts'
+import { buildContext, getActiveBridge } from './suggest.ts'
+import { hideSuggestion, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
 import { ChatToc } from './ChatToc.tsx'
 
 /** Full props of the input-history entry: framework standard kit + owner share. */
@@ -212,6 +214,142 @@ export function InputHistory(props: InputHistoryProps) {
 
   // Any draft change re-arms the ghost (a dismissed ghost must not stick).
   useEffect(() => { dismissedRef.current = null }, [draft])
+
+  // ---- context suggestion (Codex-style predicted next prompt) ----
+  /** Last accepted prediction: keyed by the context it was made from. */
+  const suggestRef = useRef<{ key: string; text: string } | null>(null)
+  /** Context the user dismissed with Escape (suppressed until it changes). */
+  const suggestDismissedRef = useRef<string | null>(null)
+  const suggestAbortRef = useRef<AbortController | null>(null)
+  const suggestTimerRef = useRef<number | null>(null)
+  /** One attempt chain at a time: overlapping triggers would cancel each other. */
+  const suggestPendingRef = useRef(false)
+  /** Empty model answers already retried for the current context. */
+  const emptyTriesRef = useRef(0)
+
+  /** Stop any scheduled or in-flight prediction and drop the overlay. */
+  const clearSuggestion = useCallback((): void => {
+    if (suggestTimerRef.current !== null) {
+      window.clearTimeout(suggestTimerRef.current)
+      suggestTimerRef.current = null
+    }
+    suggestAbortRef.current?.abort()
+    suggestAbortRef.current = null
+    suggestPendingRef.current = false
+    hideSuggestion()
+  }, [])
+
+  /**
+   * Predict the next prompt from the conversation and ghost it in the
+   * (empty) composer. Cached per context, debounced, and cancelled by any
+   * draft change or submit.
+   */
+  const requestSuggestion = useCallback((): void => {
+    const live0 = liveRef.current
+    if (!getPrefs().contextSuggest) { clearSuggestion(); return }
+    const live = liveRef.current
+    if (live.draft !== '' || live.phase !== 'plain' || live.removed) { clearSuggestion(); return }
+    if (suggestPendingRef.current || suggestionVisible()) return
+    const bridge = getActiveBridge()
+    if (bridge === null) return
+    const host = editorHost()
+    if (host === null) return
+    suggestPendingRef.current = true
+    const controller = new AbortController()
+    suggestAbortRef.current = controller
+    let attempts = 0
+    // Wait for the frame to settle before reading the conversation: node
+    // updates arrive before React paints the chat rows, so an immediate read
+    // would see an empty transcript. Empty reads retry cheaply — no model call
+    // happens until there is context.
+    const attempt = (): void => {
+      suggestTimerRef.current = null
+      const now = liveRef.current
+      if (controller.signal.aborted || now.draft !== '' || now.phase !== 'plain' || now.removed) {
+        suggestPendingRef.current = false
+        return
+      }
+      let context = ''
+      try {
+        context = buildContext()
+      } catch (error) {
+        suggestPendingRef.current = false
+        return
+      }
+      if (context.trim() === '') {
+        attempts += 1
+        // A freshly opened session can take a while to paint its rows; empty
+        // reads cost nothing, so keep watching for up to ~24s.
+        if (attempts < 20) suggestTimerRef.current = window.setTimeout(attempt, 1200)
+        else suggestPendingRef.current = false
+        return
+      }
+      if (suggestDismissedRef.current === context) { suggestPendingRef.current = false; return }
+      const key = context.slice(-600)
+      if (suggestRef.current?.key !== key) emptyTriesRef.current = 0
+      const cached = suggestRef.current
+      if (cached !== null && cached.key === key) {
+        suggestPendingRef.current = false
+        if (cached.text !== '') showSuggestion(cached.text, T('suggest.accept'), host)
+        return
+      }
+      void bridge.fetch(context, controller.signal).then((text) => {
+        suggestPendingRef.current = false
+        if (controller.signal.aborted) return
+        const latest = liveRef.current
+        if (latest.draft !== '' || latest.phase !== 'plain' || latest.removed) return
+        // An empty answer must not hide a suggestion that is already on screen,
+        // and must not be cached: a later turn can still produce one. Reasoning
+        // models occasionally spend the whole budget thinking, so one silent
+        // retry is allowed per context before giving up on it.
+        if (text === '') {
+          if (emptyTriesRef.current < 2) {
+            emptyTriesRef.current += 1
+            attempt()
+          }
+          return
+        }
+        emptyTriesRef.current = 0
+        suggestRef.current = { key, text }
+        showSuggestion(text, T('suggest.accept'), host)
+      })
+    }
+    suggestTimerRef.current = window.setTimeout(attempt, 300)
+  }, [clearSuggestion])
+
+  // Triggers: the empty composer gaining focus, and each turn that just ended.
+  useEffect(() => {
+    const card = document.querySelector(COMPOSER_CARD)
+    if (card === null) return
+    const onFocusIn = (event: Event): void => {
+      if (!isEditorTarget(event.target)) return
+      requestSuggestion()
+    }
+    card.addEventListener('focusin', onFocusIn)
+    // Conversation rows render after the node update; observing the scrollport
+    // is what makes a freshly opened session (and every finished turn) predict.
+    const scrollport = document.querySelector('[data-conversation-scroll]') ?? document.body
+    const observer = new MutationObserver(() => { requestSuggestion() })
+    observer.observe(scrollport, { childList: true, subtree: true, characterData: true })
+    return () => {
+      card.removeEventListener('focusin', onFocusIn)
+      observer.disconnect()
+    }
+  }, [requestSuggestion])
+
+  // The composer being empty and the session idle is the precondition; the
+  // effect also re-runs whenever conversation nodes arrive (a freshly opened
+  // session renders its messages after mount, and each turn adds nodes), which
+  // is exactly when a fresh prediction makes sense. The cache keeps this to at
+  // most one model call per context.
+  useEffect(() => {
+    if (draft !== '') {
+      clearSuggestion()
+      return
+    }
+    if (phase === 'plain') requestSuggestion()
+    else clearSuggestion()
+  }, [draft, phase, messages.length, clearSuggestion, requestSuggestion])
   useEffect(() => {
     syncCompletion()
     // Caret moves (arrow keys, clicks, selection), layout shifts and scrolls all
@@ -401,6 +539,39 @@ export function InputHistory(props: InputHistoryProps) {
         searchRef.current = null
         hideSearchOverlay()
         return
+      }
+
+      // ---- context suggestion: Tab accepts the predicted next prompt ----
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (e.key === 'Escape' && suggestionVisible()) {
+          suggestDismissedRef.current = buildContext()
+          clearSuggestion()
+          return
+        }
+        const predicted = suggestRef.current
+        if (e.key === 'Tab' && live.draft === '' && predicted !== null && suggestionVisible()) {
+          const host = editorHost()
+          if (host !== null) {
+            e.preventDefault()
+            e.stopPropagation()
+            const actions = live.inputActions as {
+              captureInsertion?: () => unknown
+              insertText?: (text: string, span: unknown) => boolean
+              setDraft?: (text: string) => void
+            }
+            let inserted = false
+            if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+              try { inserted = actions.insertText(predicted.text, actions.captureInsertion()) === true } catch { inserted = false }
+            }
+            if (!inserted) {
+              actions.setDraft?.(predicted.text)
+              setEditorCaret(host, predicted.text.length)
+            }
+            clearSuggestion()
+            dismissedRef.current = null
+            return
+          }
+        }
       }
 
       // ---- prompt completion: Tab (or →) accepts the ghosted suffix ----

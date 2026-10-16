@@ -26,7 +26,7 @@
 | Correspondencia | **≥ 1.2.16** soporta 0.1.x y 0.2.x a la vez (1.2.16 corrigió la instalación rechazada en 0.2.1+; 1.2.17 migró tipos/dependencias al diseño de paquetes 0.2.x manteniendo 0.1.x). **No existe ni hace falta una línea 1.3.x** |
 | Plataforma | Solo Web GUI (plugin de cliente; estado local del navegador; sin red, sin código nativo) |
 | Node | `>=20` |
-| Modelo | Cualquiera (no hace peticiones al modelo — comportamiento de UI puro) |
+| Modelo | Cualquiera (solo la sugerencia por contexto, desactivable, llama al modelo de la sesión) |
 | Idioma de la interfaz | 中文 / English (sigue el idioma de la app de DSH, se cambia en Ajustes) |
 
 ## Qué obtienes
@@ -42,9 +42,10 @@
 5. **Clic derecho pega directamente** — un clic derecho sobre el compositor pega el portapapeles — sin menú contextual, como en una terminal Linux. El pegado usa la misma canalización que Ctrl+V (las imágenes y las chips de referencia se comportan igual), con respaldo de Clipboard API cuando la ruta execCommand está bloqueada.
 6. **Historial entre sesiones** (interruptor en Ajustes, apagado por defecto) — mantiene el historial de ↑/↓ entre sesiones, almacenado en localStorage (límite 200), sobrevive a recargas y cambios de sesión.
 7. **Autocompletado de prompts (estilo Codex, ajuste en Ajustes, activado por defecto)** — mientras tu borrador sea el prefijo de un prompt anterior, el resto se muestra en gris claro tras el cursor; acéptalo con **Tab o →** (Esc lo ignora). La coincidencia no distingue mayúsculas y los borradores que empiezan por `/` o `@` se dejan a los menús propios del host.
-8. **TOC del chat (índice de la conversación)** — cuando la conversación se hace larga, una pequeña manija semitransparente y arrastrable en el borde izquierdo del chat (se ilumina al pasar el cursor) despliega un índice de cada mensaje de usuario en orden — haz clic en cualquier entrada para saltar a ese punto y desplázate por todas las entradas cuando la lista es larga; haz clic fuera o pulsa Esc para cerrar. Se puede desactivar en Ajustes.
+8. **Sugerencia por contexto (estilo Codex, ajuste en Ajustes, activado por defecto)** — con el compositor vacío, el plugin entrega la conversación reciente al **modelo de la sesión actual**, predice lo que vas a escribir y lo muestra en gris dentro del campo con el aviso «Tab para aceptar»; **Tab** lo rellena (escribir, Esc o un turno nuevo lo descartan). Se ejecuta una vez por turno terminado y una al enfocar el campo vacío, con caché por contexto.
+9. **TOC del chat (índice de la conversación)** — cuando la conversación se hace larga, una pequeña manija semitransparente y arrastrable en el borde izquierdo del chat (se ilumina al pasar el cursor) despliega un índice de cada mensaje de usuario en orden — haz clic en cualquier entrada para saltar a ese punto y desplázate por todas las entradas cuando la lista es larga; haz clic fuera o pulsa Esc para cerrar. Se puede desactivar en Ajustes.
 
-Comportamiento de UI puro: sin eventos de sesión, sin cambios en el bucle del agente, sin peticiones al modelo. El texto recuperado o citado solo entra en el borrador normal del compositor — llega al modelo solo si *tú* pulsas Enter.
+Comportamiento de UI puro: sin eventos de sesión, sin cambios en el bucle del agente. El historial, las citas y las copias son locales del navegador y sin peticiones; la única función que llama a un modelo es la **sugerencia por contexto**, que controlas en Ajustes (activada por defecto). Mientras está activa envía como mucho una petición mínima por turno (~512 tokens) al **modelo de la sesión actual**; si la desactivas, el plugin vuelve a estar totalmente sin red. El texto recuperado, citado o predicho solo entra en el borrador del compositor — llega al modelo solo si *tú* pulsas Enter.
 
 ## Inicio rápido
 
@@ -69,6 +70,7 @@ Abre **Ajustes → `>_ Terminal Input`** (almacenado en localStorage del navegad
 |---|---|---|
 | Modo de copia (al seleccionar) | `Barra de herramientas` | `Barra` (recomendado; escribe en el portapapeles solo al hacer clic) / `Copiar automático al seleccionar` (estilo terminal) |
 | Historial entre sesiones | Apagado | El historial de ↑/↓ persiste entre sesiones en localStorage (límite 200) |
+| Sugerencia por contexto (Tab acepta) | Activado | Con el compositor vacío predice tu próximo prompt con el modelo de la sesión actual; Tab acepta (una vez por turno, poco consumo) |
 | Autocompletado de prompts (Tab acepta) | Activado | Muestra en gris el prompt coincidente del historial mientras escribes; Tab o → acepta, Esc ignora |
 | TOC del chat | Activado | Mostrar la manija arrastrable en el borde izquierdo del chat; se puede desactivar |
 | Pegar con clic derecho | Activado | Apagado restaura el menú contextual nativo del navegador |

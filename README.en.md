@@ -26,7 +26,7 @@
 | Version mapping | **≥ 1.2.16** supports 0.1.x and 0.2.x together (1.2.16 fixed the rejected install on 0.2.1+; 1.2.17 moved types/deps to the 0.2.x package layout while keeping 0.1.x working). **No 1.3.x breaking line exists or is needed** |
 | Platform | Web GUI only (client plugin; browser-local state; no network, no native code) |
 | Node | `>=20` |
-| Model | Any (no model requests — pure UI behavior) |
+| Model | Any (only the toggleable context suggestion calls the current session model) |
 | UI language | 中文 / English (follows the DSH app locale, switchable in Settings) |
 
 ## What you get
@@ -42,9 +42,10 @@
 5. **Right-click pastes directly** — a right-click on the composer pastes the clipboard — no context menu, like a Linux terminal. Paste runs the same pipeline as Ctrl+V (images and reference chips behave identically), with a Clipboard API fallback when the execCommand path is blocked.
 6. **Cross-session history** (Settings toggle, default off) — keeps Up/Down history across sessions, stored in browser localStorage (cap 200), survives reloads and session switches.
 7. **Prompt completion (Codex-style, Settings toggle, default on)** — while your draft is a prefix of an earlier prompt, the remainder is ghosted after the caret in dim text; accept it in one keystroke with **Tab or →** (Escape ignores it). Matching is case-insensitive, and `/` or `@` drafts are left to the host's own command/reference menus.
-8. **Chat TOC (conversation directory)** — when the conversation gets long, a subtle semi-transparent, draggable grip on the chat's left edge (brightens on hover) expands a directory of every user message in order — click any entry to jump to that spot, and scroll through all entries when the list gets long; click outside or press Esc to close. Can be toggled off in Settings.
+8. **Context suggestion (Codex-style, Settings toggle, default on)** — with an empty composer the plugin hands the recent conversation to the **current session model**, predicts the prompt you are about to write, and shows it as a dim full sentence inside the input with a "Press Tab to accept" hint; **Tab** fills it in (typing, Escape or a new turn dismisses it). It runs once per finished turn plus once when the empty composer gains focus, and caches per context so the same context never calls twice.
+9. **Chat TOC (conversation directory)** — when the conversation gets long, a subtle semi-transparent, draggable grip on the chat's left edge (brightens on hover) expands a directory of every user message in order — click any entry to jump to that spot, and scroll through all entries when the list gets long; click outside or press Esc to close. Can be toggled off in Settings.
 
-Pure UI behavior: no session events, no agent-loop changes, no model requests. Recalled or quoted text only enters the ordinary composer draft — it reaches the model only if *you* press Enter.
+Pure UI behavior: no session events, no agent-loop changes. History recall, quoting and copying are entirely browser-local and request-free; the single feature that calls a model is **context suggestion**, which you control in Settings (on by default). While enabled it sends at most one tiny prediction request (~512 token budget) per turn to the **current session model**; turn it off and the plugin is fully offline again. Recalled, quoted and predicted text only ever enters the composer draft — it reaches the model only if *you* press Enter.
 
 ## Quick start
 
@@ -69,6 +70,7 @@ Open **Settings → `>_ Terminal Input`** (stored in browser localStorage, effec
 |---|---|---|
 | Copy mode (on selection) | `Toolbar copy` | `Toolbar` (recommended; writes the clipboard only on click) / `Auto copy on select` (terminal-style) |
 | Cross-session history | Off | Up/Down history persists across sessions in browser localStorage (cap 200) |
+| Context suggestion (Tab accepts) | On | With an empty composer, predicts your next prompt using the current session model; Tab accepts (once per turn, small quota use) |
 | Prompt completion (Tab accepts) | On | Ghosts the matching history prompt while you type; Tab or → accepts, Escape ignores |
 | Chat TOC | On | Show the draggable grip on the chat left edge; can be turned off |
 | Right-click paste | On | Off restores the browser's native context menu |

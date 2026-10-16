@@ -19,6 +19,7 @@ import { SettingsSection } from './SettingsSection.tsx'
 import { NS, en, zh } from './locales.ts'
 import { setTranslator, T } from './i18n.ts'
 import { installNavGlyph } from './navGlyph.ts'
+import { createBridge, mountContribution, setActiveBridge } from './suggest.ts'
 import { bindRootContext } from './sessionCtx.ts'
 
 /** Required services: the slot registry, the locale service. */
@@ -81,6 +82,19 @@ export function apply(ctx: ClientContext): void {
   // is resolved lazily per call — it appears only after the host connection.
   bindRootContext(ctx)
 
+  // The next-prompt suggestion needs the `remote` service: mount this
+  // package's host face from an injected child context, then publish the
+  // bridge to the composer entry. Without the service the feature stays off.
+  ctx.inject(['remote'], (remoteCtx) => {
+    void mountContribution(remoteCtx).then((mounted) => {
+      if (!mounted) return
+      setActiveBridge(createBridge(remoteCtx))
+    })
+  })
+
+  // The suggestion bridge needs the `remote` service (mounted from an injected
+  // child context) and then its `remote.promptSuggest` namespace service, which
+  // only exists after the mount — the second inject waits for exactly that.
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register(
     { name: 'conversation.input.right', id: 'dsh-prompt-history' },
     InputHistory,

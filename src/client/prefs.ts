@@ -29,6 +29,12 @@ export interface PluginPrefs {
    * prompt, ghost the rest after the caret and accept it with Tab / →.
    */
   promptCompletion: boolean
+  /**
+   * Codex-style next-prompt suggestion: when the composer is empty, ask the
+   * host to predict the user's next prompt from the recent conversation and
+   * ghost it. Costs a small model call per prediction.
+   */
+  contextSuggest: boolean
 }
 
 const STORAGE_KEY = 'dsh-prompt-history.prefs'
@@ -38,6 +44,7 @@ const DEFAULTS: PluginPrefs = {
   globalHistory: false,
   tocVisible: true,
   promptCompletion: true,
+  contextSuggest: true,
 }
 
 /** Current prefs; replaced on every setPref (stable snapshot identity). */
@@ -67,6 +74,7 @@ function load(): PluginPrefs {
       globalHistory: typeof parsed.globalHistory === 'boolean' ? parsed.globalHistory : DEFAULTS.globalHistory,
       tocVisible: typeof parsed.tocVisible === 'boolean' ? parsed.tocVisible : DEFAULTS.tocVisible,
       promptCompletion: typeof parsed.promptCompletion === 'boolean' ? parsed.promptCompletion : DEFAULTS.promptCompletion,
+      contextSuggest: typeof parsed.contextSuggest === 'boolean' ? parsed.contextSuggest : DEFAULTS.contextSuggest,
     }
   } catch {
     return fallback()
