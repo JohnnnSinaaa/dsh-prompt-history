@@ -57,6 +57,15 @@ export function SettingsSection({ t }: PropsLocale<'dsh-prompt-history'>): JSX.E
       <label className="dsh-ph-row">
         <input
           type="checkbox"
+          checked={prefs.promptCompletion}
+          onChange={(e) => { setPref('promptCompletion', e.target.checked) }}
+        />
+        <span>{t('completion.toggle')}</span>
+      </label>
+
+      <label className="dsh-ph-row">
+        <input
+          type="checkbox"
           checked={prefs.tocVisible}
           onChange={(e) => { setPref('tocVisible', e.target.checked) }}
         />

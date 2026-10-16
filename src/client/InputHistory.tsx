@@ -51,6 +51,8 @@ import {
   COMPOSER_CARD, editorFocused, editorHost, editorSelectedText, editorSelectionOffsets,
   focusEditor, isEditorTarget, setEditorCaret,
 } from './editor.ts'
+import { completionEligible, matchCompletion } from './completion.ts'
+import { ghostVisible, hideGhost, showGhost } from './ghost.ts'
 import { ChatToc } from './ChatToc.tsx'
 
 /** Full props of the input-history entry: framework standard kit + owner share. */
@@ -178,6 +180,52 @@ export function InputHistory(props: InputHistoryProps) {
   const searchRef = useRef<SearchState | null>(null)
   const liveRef = useRef({ draft, phase, removed, inputActions })
   liveRef.current = { draft, phase, removed, inputActions }
+
+  // ---- prompt completion (Codex/fish-style type-ahead) ----
+  /** Draft the user dismissed the ghost on (Esc); cleared whenever it changes. */
+  const dismissedRef = useRef<string | null>(null)
+  const prefs = useSyncExternalStore(subscribePrefs, getPrefs)
+
+  /**
+   * Recompute the ghost from the live draft + caret. Cheap (a backward scan
+   * over the history ring) and idempotent, so it can be driven from any event
+   * that may have moved the caret or changed the draft.
+   */
+  const syncCompletion = useCallback((): void => {
+    if (!getPrefs().promptCompletion) { hideGhost(); return }
+    const host = editorHost()
+    if (host === null) { hideGhost(); return }
+    const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
+    if (card !== null && card.querySelector(OPEN_MENU) !== null) { hideGhost(); return }
+    const live = liveRef.current
+    if (live.phase === 'adjudicating' || live.phase === 'submitting' || live.removed) { hideGhost(); return }
+    const current = live.draft
+    if (!completionEligible(current)) { hideGhost(); return }
+    if (dismissedRef.current === current) { hideGhost(); return }
+    // Only complete from the end of the draft: mid-line edits stay untouched.
+    const offsets = editorSelectionOffsets(host)
+    if (offsets === null || offsets.start !== current.length || offsets.end !== current.length) { hideGhost(); return }
+    const suffix = matchCompletion(current, historyRef.current)
+    if (suffix === null) { hideGhost(); return }
+    showGhost(suffix, host)
+  }, [])
+
+  // Any draft change re-arms the ghost (a dismissed ghost must not stick).
+  useEffect(() => { dismissedRef.current = null }, [draft])
+  useEffect(() => {
+    syncCompletion()
+    // Caret moves (arrow keys, clicks, selection), layout shifts and scrolls all
+    // move the ghost's anchor without changing the draft.
+    document.addEventListener('selectionchange', syncCompletion)
+    window.addEventListener('resize', syncCompletion)
+    window.addEventListener('scroll', syncCompletion, true)
+    return () => {
+      document.removeEventListener('selectionchange', syncCompletion)
+      window.removeEventListener('resize', syncCompletion)
+      window.removeEventListener('scroll', syncCompletion, true)
+      hideGhost()
+    }
+  }, [syncCompletion, draft, messages, prefs.promptCompletion])
 
   // Cross-session history ring: when the setting is on, the history persists
   // in localStorage (capped), survives reloads and session switches, and is
@@ -353,6 +401,48 @@ export function InputHistory(props: InputHistoryProps) {
         searchRef.current = null
         hideSearchOverlay()
         return
+      }
+
+      // ---- prompt completion: Tab (or →) accepts the ghosted suffix ----
+      if (getPrefs().promptCompletion && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === 'Escape' && ghostVisible()) {
+          dismissedRef.current = live.draft
+          hideGhost()
+          return
+        }
+        if ((e.key === 'Tab' || (e.key === 'ArrowRight' && !e.shiftKey)) && !e.shiftKey) {
+          const host = editorHost()
+          if (host !== null) {
+            const offsets = editorSelectionOffsets(host)
+            const atEnd = offsets !== null && offsets.start === live.draft.length && offsets.end === live.draft.length
+            if (atEnd) {
+              const suffix = matchCompletion(live.draft, history)
+              if (suffix !== null) {
+                e.preventDefault()
+                e.stopPropagation()
+                const actions = live.inputActions as {
+                  captureInsertion?: () => unknown
+                  insertText?: (text: string, span: unknown) => boolean
+                  setDraft?: (text: string) => void
+                }
+                let inserted = false
+                if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+                  try { inserted = actions.insertText(suffix, actions.captureInsertion()) === true } catch { inserted = false }
+                }
+                if (!inserted) {
+                  // Legacy hosts (DSH <= 0.1.x) have no insertText: replace the
+                  // draft and park the caret after the accepted suffix.
+                  const full = live.draft + suffix
+                  actions.setDraft?.(full)
+                  setEditorCaret(host, full.length)
+                }
+                dismissedRef.current = null
+                hideGhost()
+                return
+              }
+            }
+          }
+        }
       }
 
       // ---- arrow keys: prefix search (non-empty draft) or plain browse ----
@@ -654,7 +744,7 @@ export function InputHistory(props: InputHistoryProps) {
     }
   }, [])
 
-  return useSyncExternalStore(subscribePrefs, getPrefs).tocVisible
+  return prefs.tocVisible
     ? <ChatToc texts={tocTexts} onWiden={requestWiden} />
     : null
 }

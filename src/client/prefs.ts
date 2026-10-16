@@ -24,6 +24,11 @@ export interface PluginPrefs {
   globalHistory: boolean
   /** Show the draggable Chat TOC grip on the chat's left edge. */
   tocVisible: boolean
+  /**
+   * Codex-style prompt completion: while the draft is a prefix of an earlier
+   * prompt, ghost the rest after the caret and accept it with Tab / →.
+   */
+  promptCompletion: boolean
 }
 
 const STORAGE_KEY = 'dsh-prompt-history.prefs'
@@ -32,6 +37,7 @@ const DEFAULTS: PluginPrefs = {
   rightClickPaste: true,
   globalHistory: false,
   tocVisible: true,
+  promptCompletion: true,
 }
 
 /** Current prefs; replaced on every setPref (stable snapshot identity). */
@@ -60,6 +66,7 @@ function load(): PluginPrefs {
       rightClickPaste: typeof parsed.rightClickPaste === 'boolean' ? parsed.rightClickPaste : DEFAULTS.rightClickPaste,
       globalHistory: typeof parsed.globalHistory === 'boolean' ? parsed.globalHistory : DEFAULTS.globalHistory,
       tocVisible: typeof parsed.tocVisible === 'boolean' ? parsed.tocVisible : DEFAULTS.tocVisible,
+      promptCompletion: typeof parsed.promptCompletion === 'boolean' ? parsed.promptCompletion : DEFAULTS.promptCompletion,
     }
   } catch {
     return fallback()
