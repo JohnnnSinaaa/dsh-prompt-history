@@ -438,12 +438,59 @@ export function InputHistory(props: InputHistoryProps) {
     if (browse.index !== -1 && draft !== browse.lastSet) browseRef.current = RESET_BROWSE
   }, [draft])
 
+  /**
+   * Accept the visible prediction: focus the composer, insert the text through
+   * the official insertion pair (falling back to a draft write), and drop the
+   * overlay. Safe to call from anywhere — a missing editor simply does nothing.
+   * @returns whether something was accepted.
+   */
+  const acceptSuggestion = useCallback((): boolean => {
+    const predicted = suggestRef.current
+    if (predicted === null || predicted.text === '') return false
+    const host = editorHost()
+    if (host === null) return false
+    const actions = liveRef.current.inputActions as {
+      captureInsertion?: () => unknown
+      insertText?: (text: string, span: unknown) => boolean
+      setDraft?: (text: string) => void
+    }
+    focusEditor(host)
+    let inserted = false
+    if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+      try { inserted = actions.insertText(predicted.text, actions.captureInsertion()) === true } catch { inserted = false }
+    }
+    if (!inserted) {
+      actions.setDraft?.(predicted.text)
+      setEditorCaret(host, predicted.text.length)
+    }
+    clearSuggestion()
+    dismissedRef.current = null
+    return true
+  }, [clearSuggestion])
+
   // History keydown listener (mounts once; reads refs at event time):
   // ↑/↓ browse (with bash-style prefix search when the draft is non-empty)
   // and Ctrl+R incremental reverse search.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
       const target = e.target
+      // The prediction belongs to the composer even when the caret wandered off
+      // (clicking around the page is normal while reading a suggestion): accept
+      // Tab anywhere except inside another text field.
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+        && suggestionVisible() && liveRef.current.draft === '' && suggestRef.current !== null) {
+        const active = document.activeElement
+        const otherField = active instanceof HTMLElement
+          && active !== document.body
+          && active.closest(COMPOSER_CARD) === null
+          && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+        if (!otherField) {
+          e.preventDefault()
+          e.stopPropagation()
+          acceptSuggestion()
+          return
+        }
+      }
       if (!isEditorTarget(target)) return
       const card = (target as Element).closest(COMPOSER_CARD)
       if (card === null) return
@@ -557,29 +604,10 @@ export function InputHistory(props: InputHistoryProps) {
           clearSuggestion()
           return
         }
-        const predicted = suggestRef.current
-        if (e.key === 'Tab' && live.draft === '' && predicted !== null && suggestionVisible()) {
-          const host = editorHost()
-          if (host !== null) {
-            e.preventDefault()
-            e.stopPropagation()
-            const actions = live.inputActions as {
-              captureInsertion?: () => unknown
-              insertText?: (text: string, span: unknown) => boolean
-              setDraft?: (text: string) => void
-            }
-            let inserted = false
-            if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
-              try { inserted = actions.insertText(predicted.text, actions.captureInsertion()) === true } catch { inserted = false }
-            }
-            if (!inserted) {
-              actions.setDraft?.(predicted.text)
-              setEditorCaret(host, predicted.text.length)
-            }
-            clearSuggestion()
-            dismissedRef.current = null
-            return
-          }
+        if (e.key === 'Tab' && live.draft === '' && suggestionVisible() && acceptSuggestion()) {
+          e.preventDefault()
+          e.stopPropagation()
+          return
         }
       }
 
