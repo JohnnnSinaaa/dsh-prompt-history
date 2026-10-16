@@ -30,6 +30,11 @@ export interface PluginPrefs {
    */
   promptCompletion: boolean
   /**
+   * Experimental side chat: a second work thread in the right sidebar (docked
+   * pane, split or floating) sharing this workspace. Off by default.
+   */
+  sideChat: boolean
+  /**
    * Codex-style next-prompt suggestion: when the composer is empty, ask the
    * host to predict the user's next prompt from the recent conversation and
    * ghost it. Costs a small model call per prediction.
@@ -47,6 +52,7 @@ const DEFAULTS: PluginPrefs = {
   tocVisible: true,
   promptCompletion: true,
   contextSuggest: true,
+  sideChat: false,
 }
 
 /** Current prefs; replaced on every setPref (stable snapshot identity). */
@@ -89,6 +95,7 @@ function migrate(parsed: unknown): PluginPrefs {
     tocVisible: bool(source.tocVisible, DEFAULTS.tocVisible),
     promptCompletion: bool(source.promptCompletion, DEFAULTS.promptCompletion),
     contextSuggest: bool(source.contextSuggest, DEFAULTS.contextSuggest),
+    sideChat: bool(source.sideChat, DEFAULTS.sideChat),
   }
 }
 

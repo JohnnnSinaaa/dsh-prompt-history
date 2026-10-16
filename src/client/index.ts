@@ -20,6 +20,7 @@ import { NS, en, zh } from './locales.ts'
 import { setTranslator, T } from './i18n.ts'
 import { createBridge, mountContribution, setActiveBridge } from './suggest.ts'
 import { installSuggestStyle } from './suggestOverlay.ts'
+import { bindSideChat } from './sideChat.tsx'
 import { bindRootContext } from './sessionCtx.ts'
 
 /** Required services: the slot registry, the locale service. */
@@ -55,6 +56,14 @@ const SETTINGS_CSS = [
   '.dsh-ph-toc-tip{position:fixed;z-index:2147483001;max-width:min(420px,calc(100vw - 24px));max-height:min(40vh,300px);overflow-y:auto;padding:8px 10px;border-radius:8px;background:var(--dsw-specific-menu);border:1px solid var(--dsw-alias-border-l1);box-shadow:0 6px 20px rgba(0,0,0,.22);color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;pointer-events:none;box-sizing:border-box;}',
   '.dsh-ph-toc-resize{position:absolute;right:3px;bottom:3px;width:14px;height:14px;cursor:se-resize;border-radius:3px;opacity:.55;background:linear-gradient(135deg,transparent 0 50%,var(--dsw-alias-label-tertiary) 50% 58%,transparent 58%),linear-gradient(135deg,transparent 0 66%,var(--dsw-alias-label-tertiary) 66% 74%,transparent 74%);}',
   '.dsh-ph-toc-resize:hover{opacity:1;}',
+  '.dsh-ph-button{border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:4px 12px;font-size:12px;line-height:1.4;cursor:pointer;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);}',
+  '.dsh-ph-button:hover{background:var(--dsw-alias-bg-layer-3);}',
+  '.dsh-ph-sidechat{display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;padding:10px;}',
+  '.dsh-ph-sidechat-strip{display:flex;gap:6px;flex-wrap:wrap;flex:0 0 auto;}',
+  '.dsh-ph-sidechat-chip{border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 10px;font-size:12px;cursor:pointer;background:transparent;color:var(--dsw-alias-label-secondary);}',
+  '.dsh-ph-sidechat-chip--on{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);}',
+  '.dsh-ph-sidechat-log{flex:1 1 auto;min-height:0;overflow-y:auto;border-radius:8px;border:1px dashed var(--dsw-alias-border-l1);padding:10px;}',
+  '.dsh-ph-sidechat-empty{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary);}',
 ].join('')
 
 /**
@@ -83,6 +92,12 @@ export function apply(ctx: ClientContext): void {
   bindRootContext(ctx)
   // Style first: the suggestion overlay hides the composer's own placeholder.
   installSuggestStyle()
+
+  // Side chat rides the right sidebar: the toggle decides whether the tab type
+  // and its body are registered at all.
+  ctx.inject(['sidebarRightTabs', 'sidebarRight', 'slots'], (sideCtx) => {
+    bindSideChat(sideCtx)
+  })
 
   // The next-prompt suggestion needs the `remote` service: mount this
   // package's host face from an injected child context, then publish the
