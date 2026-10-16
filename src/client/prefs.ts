@@ -38,6 +38,8 @@ export interface PluginPrefs {
 }
 
 const STORAGE_KEY = 'dsh-prompt-history.prefs'
+/** Stored shape version; bump when the migration rules change. */
+const STORE_VERSION = 2
 const DEFAULTS: PluginPrefs = {
   copyMode: 'toolbar',
   rightClickPaste: true,
@@ -51,33 +53,53 @@ const DEFAULTS: PluginPrefs = {
 let prefs: PluginPrefs = load()
 const listeners = new Set<() => void>()
 
-/** Migrate the pre-v0.7.0 boolean toggle, then read the persisted prefs. */
+/** Normalize one stored boolean. */
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+/**
+ * Migrate any stored shape into the current prefs.
+ *
+ * v2 stores `{ version, data }`; older builds stored the flat object, and the
+ * oldest one used a `copyOnSelect` boolean instead of `copyMode`. Every rule
+ * lives here so a new field never adds another branch to the loader.
+ * @param parsed - the parsed localStorage payload.
+ * @returns the normalized prefs.
+ */
+function migrate(parsed: unknown): PluginPrefs {
+  if (parsed === null || typeof parsed !== 'object') return { ...DEFAULTS }
+  const record = parsed as Record<string, unknown>
+  const wrapped = typeof record.version === 'number'
+    && record.data !== null
+    && typeof record.data === 'object'
+  const source = (wrapped ? record.data : record) as Record<string, unknown>
+  const rawMode = source.copyMode
+  const copyMode: CopyMode = rawMode === 'auto'
+    ? 'auto'
+    : rawMode === 'toolbar'
+      ? 'toolbar'
+      : typeof source.copyOnSelect === 'boolean'
+        ? (source.copyOnSelect ? 'auto' : 'toolbar')
+        : DEFAULTS.copyMode
+  return {
+    copyMode,
+    rightClickPaste: bool(source.rightClickPaste, DEFAULTS.rightClickPaste),
+    globalHistory: bool(source.globalHistory, DEFAULTS.globalHistory),
+    tocVisible: bool(source.tocVisible, DEFAULTS.tocVisible),
+    promptCompletion: bool(source.promptCompletion, DEFAULTS.promptCompletion),
+    contextSuggest: bool(source.contextSuggest, DEFAULTS.contextSuggest),
+  }
+}
+
+/** Read the persisted prefs (any stored shape). */
 function load(): PluginPrefs {
-  const fallback = (): PluginPrefs => ({ ...DEFAULTS })
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw === null) return fallback()
-    const parsed = JSON.parse(raw) as Partial<PluginPrefs> & { copyOnSelect?: boolean }
-    // Legacy migration: the old copyOnSelect boolean maps onto the mode; the
-    // retired 'off' option normalizes back to the default 'toolbar'.
-    const rawMode = (parsed as { copyMode?: unknown }).copyMode
-    const copyMode: CopyMode = rawMode === 'auto'
-      ? 'auto'
-      : rawMode === 'toolbar'
-        ? 'toolbar'
-        : typeof parsed.copyOnSelect === 'boolean'
-          ? (parsed.copyOnSelect ? 'auto' : 'toolbar')
-          : DEFAULTS.copyMode
-    return {
-      copyMode,
-      rightClickPaste: typeof parsed.rightClickPaste === 'boolean' ? parsed.rightClickPaste : DEFAULTS.rightClickPaste,
-      globalHistory: typeof parsed.globalHistory === 'boolean' ? parsed.globalHistory : DEFAULTS.globalHistory,
-      tocVisible: typeof parsed.tocVisible === 'boolean' ? parsed.tocVisible : DEFAULTS.tocVisible,
-      promptCompletion: typeof parsed.promptCompletion === 'boolean' ? parsed.promptCompletion : DEFAULTS.promptCompletion,
-      contextSuggest: typeof parsed.contextSuggest === 'boolean' ? parsed.contextSuggest : DEFAULTS.contextSuggest,
-    }
+    if (raw === null) return { ...DEFAULTS }
+    return migrate(JSON.parse(raw))
   } catch {
-    return fallback()
+    return { ...DEFAULTS }
   }
 }
 
@@ -90,7 +112,7 @@ export function getPrefs(): PluginPrefs {
 export function setPref<K extends keyof PluginPrefs>(key: K, value: PluginPrefs[K]): void {
   prefs = { ...prefs, [key]: value }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: STORE_VERSION, data: prefs }))
   } catch {
     // Storage unavailable (private mode / quota): keep the in-memory value.
   }

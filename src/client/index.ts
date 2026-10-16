@@ -18,7 +18,6 @@ import { InputHistory } from './InputHistory.tsx'
 import { SettingsSection } from './SettingsSection.tsx'
 import { NS, en, zh } from './locales.ts'
 import { setTranslator, T } from './i18n.ts'
-import { installNavGlyph } from './navGlyph.ts'
 import { createBridge, mountContribution, setActiveBridge } from './suggest.ts'
 import { installSuggestStyle } from './suggestOverlay.ts'
 import { bindRootContext } from './sessionCtx.ts'
@@ -108,13 +107,9 @@ export function apply(ctx: ClientContext): void {
       id: 'dsh-prompt-history',
       order: 60,
       locale: NS,
-      // The nav label carries no glyph — the shell would draw a generic gear
-      // for unknown ids; installNavGlyph swaps that gear for a terminal `>_`.
       label: () => T('settings.nav'),
     },
     SettingsSection,
   ))
 
-  // Swap the shell's default gear nav icon for the terminal `>_` glyph.
-  installNavGlyph()
 }

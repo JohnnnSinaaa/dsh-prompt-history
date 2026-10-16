@@ -476,8 +476,9 @@ export function InputHistory(props: InputHistoryProps) {
       const target = e.target
       // The prediction belongs to the composer even when the caret wandered off
       // (clicking around the page is normal while reading a suggestion): accept
-      // Tab anywhere except inside another text field.
-      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+      // Tab or → anywhere except inside another text field.
+      const acceptKey = e.key === 'Tab' || e.key === 'ArrowRight'
+      if (acceptKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
         && suggestionVisible() && liveRef.current.draft === '' && suggestRef.current !== null) {
         const active = document.activeElement
         const otherField = active instanceof HTMLElement
@@ -604,7 +605,7 @@ export function InputHistory(props: InputHistoryProps) {
           clearSuggestion()
           return
         }
-        if (e.key === 'Tab' && live.draft === '' && suggestionVisible() && acceptSuggestion()) {
+        if ((e.key === 'Tab' || e.key === 'ArrowRight') && live.draft === '' && suggestionVisible() && acceptSuggestion()) {
           e.preventDefault()
           e.stopPropagation()
           return

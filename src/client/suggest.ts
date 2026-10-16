@@ -160,6 +160,8 @@ export function createBridge(ctx: unknown): SuggestBridge | null {
 
 /** The mounted bridge for this page (set by the plugin apply, read by the composer entry). */
 let activeBridge: SuggestBridge | null = null
+/** Bridge-status subscribers (the settings section renders it). */
+const bridgeListeners = new Set<() => void>()
 
 /**
  * Publish the mounted bridge to the composer entry.
@@ -167,6 +169,19 @@ let activeBridge: SuggestBridge | null = null
  */
 export function setActiveBridge(bridge: SuggestBridge | null): void {
   activeBridge = bridge
+  for (const fn of [...bridgeListeners]) {
+    try { fn() } catch { /* one faulty listener must not starve the others */ }
+  }
+}
+
+/**
+ * Subscribe to bridge availability.
+ * @param fn - listener invoked whenever the bridge changes.
+ * @returns the unsubscribe disposer.
+ */
+export function subscribeBridge(fn: () => void): () => void {
+  bridgeListeners.add(fn)
+  return () => { bridgeListeners.delete(fn) }
 }
 
 /** The mounted bridge, or null when the host face is unavailable. */
