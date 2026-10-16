@@ -18,34 +18,58 @@ const PLACEHOLDER = '[data-composer-placeholder], [class*="placeholder"]'
 let node: HTMLDivElement | null = null
 /** Placeholders hidden for the current overlay, with their previous inline value. */
 let hiddenPlaceholders: Array<{ el: HTMLElement; prev: string }> = []
-/** Self-healing re-hide timer (the composer card can be remounted). */
-let rehideTimer: number | null = null
+/** Self-healing tick: re-hides a remounted placeholder and re-measures the box. */
+let tickTimer: number | null = null
+/** What is on screen right now, so a layout change can repaint it. */
+let current: Painted | null = null
+
+/** One painted suggestion: the content plus the host it must stay glued to. */
+interface Painted {
+  readonly text: string
+  readonly hint: string
+  readonly host: HTMLElement
+  readonly hidePlaceholder: boolean
+}
 
 /**
- * Keep re-applying the placeholder hiding while the overlay is on screen.
+ * Keep the overlay correct while it is on screen.
  *
- * Opening the app mounts the composer in stages: the card (and its placeholder)
- * can be replaced right after the first prediction, which would drop the class
- * and reveal the placeholder under the ghost. A light poll is cheaper and more
- * robust here than observing every mount point.
+ * Two things move under it without any event of their own: the composer is
+ * mounted in stages (its card and placeholder can be replaced right after the
+ * first prediction), and the column it lives in resizes or shifts whenever a
+ * sidebar opens or closes. A light poll re-hides the placeholder and re-measures
+ * the box, which also catches pure moves that a resize observer never reports.
  */
-function startRehide(): void {
-  if (rehideTimer !== null) return
-  rehideTimer = window.setInterval(() => {
-    if (node === null) {
-      stopRehide()
-      return
-    }
-    hidePlaceholders()
-  }, 400)
+function startTick(): void {
+  if (tickTimer !== null) return
+  tickTimer = window.setInterval(tick, 250)
 }
 
 /** Stop the self-healing poll. */
-function stopRehide(): void {
-  if (rehideTimer !== null) {
-    window.clearInterval(rehideTimer)
-    rehideTimer = null
+function stopTick(): void {
+  if (tickTimer !== null) {
+    window.clearInterval(tickTimer)
+    tickTimer = null
   }
+}
+
+/** One self-healing pass: drop a dead host, re-hide, re-measure, repaint. */
+function tick(): void {
+  if (node === null || current === null) {
+    stopTick()
+    return
+  }
+  if (!current.host.isConnected) {
+    hideSuggestion()
+    return
+  }
+  if (current.hidePlaceholder) hidePlaceholders()
+  paint()
+}
+
+/** Repaint on viewport changes, immediately rather than on the next tick. */
+function onViewportChange(): void {
+  if (node !== null && current !== null) paint()
 }
 
 /** Hide the composer placeholder (inline + via the card class for re-renders). */
@@ -92,6 +116,8 @@ function ensureStyle(): void {
  */
 export function installSuggestStyle(): void {
   ensureStyle()
+  window.addEventListener('resize', onViewportChange, { passive: true })
+  window.addEventListener('scroll', onViewportChange, { passive: true, capture: true })
 }
 
 /** Is a suggestion currently on screen? */
@@ -101,7 +127,8 @@ export function suggestionVisible(): boolean {
 
 /** Remove the suggestion overlay (idempotent). */
 export function hideSuggestion(): void {
-  stopRehide()
+  stopTick()
+  current = null
   restorePlaceholders()
   if (node !== null) {
     node.remove()
@@ -125,6 +152,53 @@ function editorBox(host: HTMLElement): { left: number; top: number; width: numbe
     height: Math.max(line, rect.height - pad('padding-top') - pad('padding-bottom')),
     line,
   }
+}
+
+/**
+ * Re-measure the host and rewrite the overlay's geometry and content.
+ *
+ * Everything positional is derived here and nowhere else, so a repaint after a
+ * sidebar toggle, a window resize or a composer remount puts the ghost back
+ * exactly on the editor's content box.
+ * @returns whether the overlay was painted.
+ */
+function paint(): boolean {
+  const painted = current
+  const el = node
+  if (painted === null || el === null) return false
+  const box = editorBox(painted.host)
+  if (box === null) return false
+  const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
+  const style = window.getComputedStyle(card ?? painted.host)
+  const textEl = document.createElement('span')
+  textEl.className = 'dsh-ph-suggest-text'
+  textEl.textContent = painted.text
+  const hintEl = document.createElement('span')
+  hintEl.className = 'dsh-ph-suggest-hint'
+  // The prediction may itself mention Tab (the conversation talks about it);
+  // never repeat the hint in that case.
+  const showHint = painted.hint !== '' && !/tab/i.test(painted.text)
+  // A block hint needs a second line of room inside the composer.
+  const block = box.height >= box.line * 2.1
+  if (!showHint) {
+    hintEl.textContent = ''
+  } else if (block) {
+    hintEl.classList.add('dsh-ph-suggest-hint--block')
+    hintEl.textContent = painted.hint
+  } else {
+    hintEl.textContent = ` ${painted.hint}`
+  }
+  el.textContent = ''
+  el.append(textEl, hintEl)
+  el.style.font = style.font === '' ? 'inherit' : style.font
+  el.style.letterSpacing = style.letterSpacing
+  el.style.left = `${box.left}px`
+  el.style.top = `${box.top}px`
+  el.style.width = `${box.width}px`
+  el.style.height = `${box.height}px`
+  el.style.lineHeight = `${box.line}px`
+  hintEl.style.fontSize = `${Math.max(10, (Number.parseFloat(style.fontSize) || 14) - 2)}px`
+  return true
 }
 
 /**
@@ -164,45 +238,19 @@ export function showSuggestion(
     return false
   }
   ensureStyle()
-  if (options.hidePlaceholder !== false) {
-    hidePlaceholders()
-    startRehide()
-  }
+  const hidePlaceholder = options.hidePlaceholder !== false
+  if (hidePlaceholder) hidePlaceholders()
   if (node === null) {
     node = document.createElement('div')
     node.className = CLASS
     node.setAttribute('aria-hidden', 'true')
     document.body.appendChild(node)
   }
-  node.textContent = ''
-  const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
-  const style = window.getComputedStyle(card ?? host)
-  const textEl = document.createElement('span')
-  textEl.className = 'dsh-ph-suggest-text'
-  textEl.textContent = text
-  const hintEl = document.createElement('span')
-  hintEl.className = 'dsh-ph-suggest-hint'
-  // The prediction may itself mention Tab (the conversation talks about it);
-  // never repeat the hint in that case.
-  const showHint = hint !== '' && !/tab/i.test(text)
-  // A block hint needs a second line of room inside the composer.
-  const block = box.height >= box.line * 2.1
-  if (!showHint) {
-    hintEl.textContent = ''
-  } else if (block) {
-    hintEl.classList.add('dsh-ph-suggest-hint--block')
-    hintEl.textContent = hint
-  } else {
-    hintEl.textContent = ` ${hint}`
+  current = { text, hint, host, hidePlaceholder }
+  if (!paint()) {
+    hideSuggestion()
+    return false
   }
-  node.append(textEl, hintEl)
-  node.style.font = style.font === '' ? 'inherit' : style.font
-  node.style.letterSpacing = style.letterSpacing
-  node.style.left = `${box.left}px`
-  node.style.top = `${box.top}px`
-  node.style.width = `${box.width}px`
-  node.style.height = `${box.height}px`
-  node.style.lineHeight = `${box.line}px`
-  hintEl.style.fontSize = `${Math.max(10, (Number.parseFloat(style.fontSize) || 14) - 2)}px`
+  startTick()
   return true
 }

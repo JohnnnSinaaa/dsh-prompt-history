@@ -24,6 +24,8 @@ function ensureStyle(): void {
     'color:var(--dsw-alias-label-primary);}',
   ].join('')
   document.head.appendChild(tag)
+  window.addEventListener('resize', onViewportChange, { passive: true })
+  window.addEventListener('scroll', onViewportChange, { passive: true, capture: true })
 }
 
 /** Is the ghost currently on screen? */
@@ -33,6 +35,8 @@ export function ghostVisible(): boolean {
 
 /** Remove the ghost (idempotent). */
 export function hideGhost(): void {
+  stopTick()
+  current = null
   if (node !== null) {
     node.remove()
     node = null
@@ -93,6 +97,65 @@ function textareaCaretRect(host: HTMLTextAreaElement): DOMRect | null {
   return rect
 }
 
+/** What the ghost currently shows: the suffix and the host holding the caret. */
+let current: { readonly text: string; readonly host: HTMLTextAreaElement | HTMLElement } | null = null
+/** Self-healing tick: the composer moves whenever a sidebar opens or closes. */
+let tickTimer: number | null = null
+
+/** Start following the caret while the ghost is on screen. */
+function startTick(): void {
+  if (tickTimer !== null) return
+  tickTimer = window.setInterval(() => {
+    if (node === null || current === null) {
+      stopTick()
+      return
+    }
+    if (!current.host.isConnected) {
+      hideGhost()
+      return
+    }
+    paint()
+  }, 250)
+}
+
+/** Stop following the caret. */
+function stopTick(): void {
+  if (tickTimer !== null) {
+    window.clearInterval(tickTimer)
+    tickTimer = null
+  }
+}
+
+/** Repaint on viewport changes without waiting for the next tick. */
+function onViewportChange(): void {
+  if (node !== null && current !== null) paint()
+}
+
+/**
+ * Re-measure the caret and move the ghost onto it.
+ *
+ * The position is derived here and nowhere else, so a sidebar toggle or a window
+ * resize puts the ghost back beside the caret instead of leaving it where the
+ * composer used to be.
+ * @returns whether the ghost was painted.
+ */
+function paint(): boolean {
+  const shown = current
+  const el = node
+  if (shown === null || el === null) return false
+  const rect = caretRect(shown.host)
+  if (rect === null) return false
+  const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
+  const font = card !== null ? window.getComputedStyle(card).font : ''
+  el.textContent = shown.text
+  el.style.font = font === '' ? 'inherit' : font
+  el.style.left = `${rect.right}px`
+  el.style.top = `${rect.top}px`
+  el.style.height = `${rect.height}px`
+  el.style.lineHeight = `${rect.height}px`
+  return true
+}
+
 /** The caret box for the composer host, or null when it cannot be measured. */
 function caretRect(host: HTMLTextAreaElement | HTMLElement): DOMRect | null {
   if (host instanceof HTMLTextAreaElement) return textareaCaretRect(host)
@@ -122,13 +185,11 @@ export function showGhost(text: string, host: HTMLTextAreaElement | HTMLElement)
     node.setAttribute('aria-hidden', 'true')
     document.body.appendChild(node)
   }
-  const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
-  const font = card !== null ? window.getComputedStyle(card).font : ''
-  node.textContent = text
-  node.style.font = font === '' ? 'inherit' : font
-  node.style.left = `${rect.right}px`
-  node.style.top = `${rect.top}px`
-  node.style.height = `${rect.height}px`
-  node.style.lineHeight = `${rect.height}px`
+  current = { text, host }
+  if (!paint()) {
+    hideGhost()
+    return false
+  }
+  startTick()
   return true
 }
