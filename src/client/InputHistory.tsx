@@ -974,12 +974,17 @@ export function InputHistory(props: InputHistoryProps) {
         } else {
           const rect = selectionRect()
           if (rect !== null) {
-            showSelectionToolbar(rect, quoteSelection, () => {
-              const selection = document.getSelection()
-              const text = selection !== null && !selection.isCollapsed ? selection.toString() : ''
-              if (text.trim() === '') return
-              sendToSideChat(quoteBlock(text))
-            })
+            // The action only exists while the feature is on: a disabled side chat
+            // must not put a button in the toolbar that cannot do anything.
+            const askInSideChat = getPrefs().sideChat
+              ? (): void => {
+                  const selection = document.getSelection()
+                  const text = selection !== null && !selection.isCollapsed ? selection.toString() : ''
+                  if (text.trim() === '') return
+                  sendToSideChat(quoteBlock(text))
+                }
+              : undefined
+            showSelectionToolbar(rect, quoteSelection, askInSideChat)
           }
         }
       }, 150)

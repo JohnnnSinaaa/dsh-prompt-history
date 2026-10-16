@@ -49,7 +49,7 @@ export interface PluginPrefs {
 
 const STORAGE_KEY = 'dsh-prompt-history.prefs'
 /** Stored shape version; bump when the migration rules change. */
-const STORE_VERSION = 2
+const STORE_VERSION = 3
 const DEFAULTS: PluginPrefs = {
   copyMode: 'toolbar',
   rightClickPaste: true,
@@ -57,7 +57,7 @@ const DEFAULTS: PluginPrefs = {
   tocVisible: true,
   promptCompletion: true,
   contextSuggest: true,
-  sideChat: false,
+  sideChat: true,
   writeGuard: true,
 }
 
@@ -73,9 +73,13 @@ function bool(value: unknown, fallback: boolean): boolean {
 /**
  * Migrate any stored shape into the current prefs.
  *
- * v2 stores `{ version, data }`; older builds stored the flat object, and the
- * oldest one used a `copyOnSelect` boolean instead of `copyMode`. Every rule
- * lives here so a new field never adds another branch to the loader.
+ * v3 stores `{ version, data }` and made the side chat default-on: v2 payloads
+ * (written while it shipped as off-by-default) adopt the new default instead of
+ * keeping the value nobody chose deliberately — the feature had no UI surface at
+ * the time, so a stored `false` there is a default, not a decision.
+ * Older builds stored the flat object, and the oldest one used a `copyOnSelect`
+ * boolean instead of `copyMode`. Every rule lives here so a new field never adds
+ * another branch to the loader.
  * @param parsed - the parsed localStorage payload.
  * @returns the normalized prefs.
  */
@@ -86,6 +90,10 @@ function migrate(parsed: unknown): PluginPrefs {
     && record.data !== null
     && typeof record.data === 'object'
   const source = (wrapped ? record.data : record) as Record<string, unknown>
+  const storedVersion = wrapped ? (record.version as number) : 1
+  // v1/v2 payloads predate the side chat's default flip, so a stored false there
+  // is the old default rather than a choice the user made.
+  const sideChatDefault = storedVersion >= 3 ? DEFAULTS.sideChat : true
   const rawMode = source.copyMode
   const copyMode: CopyMode = rawMode === 'auto'
     ? 'auto'
@@ -101,17 +109,27 @@ function migrate(parsed: unknown): PluginPrefs {
     tocVisible: bool(source.tocVisible, DEFAULTS.tocVisible),
     promptCompletion: bool(source.promptCompletion, DEFAULTS.promptCompletion),
     contextSuggest: bool(source.contextSuggest, DEFAULTS.contextSuggest),
-    sideChat: bool(source.sideChat, DEFAULTS.sideChat),
+    sideChat: storedVersion >= 3 ? bool(source.sideChat, sideChatDefault) : true,
     writeGuard: bool(source.writeGuard, DEFAULTS.writeGuard),
   }
 }
 
-/** Read the persisted prefs (any stored shape). */
+/** Read the persisted prefs (any stored shape), upgrading the payload in place. */
 function load(): PluginPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw === null) return { ...DEFAULTS }
-    return migrate(JSON.parse(raw))
+    const parsed: unknown = JSON.parse(raw)
+    const next = migrate(parsed)
+    // Write the upgraded shape back once, so the migration rule does not have to
+    // be re-applied on every load (and 'stored' matches what is in force).
+    const storedVersion = parsed !== null && typeof parsed === 'object' && typeof (parsed as { version?: unknown }).version === 'number'
+      ? (parsed as { version: number }).version
+      : 1
+    if (storedVersion !== STORE_VERSION) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: STORE_VERSION, data: next }))
+    }
+    return next
   } catch {
     return { ...DEFAULTS }
   }
