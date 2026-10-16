@@ -12,7 +12,7 @@
  *
  * @module dsh-prompt-history/client/sideChat
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the Context merge (ctx.sidebarRight / ctx.sidebarRightTabs).
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
@@ -20,6 +20,7 @@ import { T } from './i18n.ts'
 import { NS } from './locales.ts'
 import { getPrefs, subscribePrefs } from './prefs.ts'
 import { threads, type SideThread, type ThreadObservable } from './threads.ts'
+import { PromptComposer } from './panelComposer.tsx'
 import type { ChatRow } from './nodes.ts'
 
 /** Tab type identity (the body slot and the title seat are keyed by it). */
@@ -68,6 +69,20 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
   const rows = useSyncExternalStore(rowsObs.subscribe.bind(rowsObs), rowsObs.getSnapshot.bind(rowsObs))
   const running = useSyncExternalStore(runObs.subscribe.bind(runObs), runObs.getSnapshot.bind(runObs))
   const logRef = useRef<HTMLDivElement | null>(null)
+
+  // The thread's own prompts are its history; its transcript is the prediction context.
+  const history = useMemo(() => {
+    const out: string[] = []
+    for (const row of rows) {
+      if (row.role !== 'user') continue
+      if (out[out.length - 1] !== row.text) out.push(row.text)
+    }
+    return out
+  }, [rows])
+  const predictContext = useCallback(
+    () => rows.slice(-8).map((row) => `${row.role}: ${row.text}`).join('\n').slice(-6000),
+    [rows],
+  )
 
   // Follow the tail as the turn streams in.
   useEffect(() => {
@@ -122,18 +137,14 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
       </div>
 
       <div className="dsh-ph-sidechat-compose">
-        <textarea
-          className="dsh-ph-sidechat-input"
-          rows={2}
+        <PromptComposer
           value={draft}
+          onChange={setDraft}
+          onSubmit={submit}
+          running={running}
+          history={history}
+          predictContext={predictContext}
           placeholder={T('sideChat.input')}
-          onChange={(event) => { setDraft(event.target.value) }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              submit()
-            }
-          }}
         />
         {running
           ? (

@@ -74,6 +74,9 @@ const SETTINGS_CSS = [
   '.dsh-ph-sidechat-row--tool .dsh-ph-sidechat-text{color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;}',
   '.dsh-ph-sidechat-row--user .dsh-ph-sidechat-text{color:var(--dsw-alias-label-primary);}',
   '.dsh-ph-sidechat-compose{display:flex;gap:6px;align-items:flex-end;flex:0 0 auto;}',
+  '.dsh-ph-panelComposer{display:flex;flex-direction:column;gap:4px;flex:1 1 auto;min-width:0;}',
+  '.dsh-ph-panelHint{font-size:11px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+  '.dsh-ph-panelHintText{color:var(--dsw-alias-label-secondary);}',
   '.dsh-ph-sidechat-input{flex:1 1 auto;min-width:0;resize:vertical;border-radius:6px;border:1px solid var(--dsw-alias-border-l1);',
   'background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:12px system-ui,sans-serif;padding:6px 8px;}',
 ].join('')

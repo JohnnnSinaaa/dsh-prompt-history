@@ -138,7 +138,17 @@ function editorBox(host: HTMLElement): { left: number; top: number; width: numbe
  * @param host - the composer editor host to align against.
  * @returns whether the overlay is on screen.
  */
-export function showSuggestion(text: string, hint: string, host: HTMLElement): boolean {
+export interface ShowSuggestionOptions {
+  /** Hide the composer's own placeholder under the ghost (off for panel fields). */
+  readonly hidePlaceholder?: boolean
+}
+
+export function showSuggestion(
+  text: string,
+  hint: string,
+  host: HTMLElement,
+  options: ShowSuggestionOptions = {},
+): boolean {
   if (text === '') {
     hideSuggestion()
     return false
@@ -154,8 +164,10 @@ export function showSuggestion(text: string, hint: string, host: HTMLElement): b
     return false
   }
   ensureStyle()
-  hidePlaceholders()
-  startRehide()
+  if (options.hidePlaceholder !== false) {
+    hidePlaceholders()
+    startRehide()
+  }
   if (node === null) {
     node = document.createElement('div')
     node.className = CLASS
