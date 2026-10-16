@@ -33,6 +33,12 @@ export interface ThreadState {
   readonly running: boolean
   /** Turns that finished while this thread was not the one on screen. */
   readonly unread: number
+  /**
+   * Rows already present when the thread started: a fork inherits the whole main
+   * transcript, and counting those as "touched by the thread" would make the
+   * write guard report a clash nobody caused.
+   */
+  readonly baseline: number
 }
 
 /** The panel's snapshot: the thread list plus each thread's live state. */
@@ -120,7 +126,7 @@ class ThreadStore {
 
   /** State of one thread (never undefined for a known id). */
   stateOf(threadId: string): ThreadState {
-    return this.states.get(threadId) ?? { running: false, unread: 0 }
+    return this.states.get(threadId) ?? { running: false, unread: 0, baseline: 0 }
   }
 
   /** Total unread completions, for the sidebar tab chip. */
@@ -188,7 +194,7 @@ class ThreadStore {
         title: `${label} ${this.sequence}`,
       }
       this.refs.set(thread.id, reference)
-      this.states.set(thread.id, { running: false, unread: 0 })
+      this.states.set(thread.id, { running: false, unread: 0, baseline: this.rowsOf(sessionId).getSnapshot().length })
       this.threads.push(thread)
       this.watchTurn(thread.id, thread.sessionId)
       this.notify()
@@ -249,12 +255,13 @@ class ThreadStore {
     let wasRunning = observable.getSnapshot()
     const stop = observable.subscribe(() => {
       const running = observable.getSnapshot()
-      const state = this.states.get(threadId) ?? { running: false, unread: 0 }
+      const state = this.states.get(threadId) ?? { running: false, unread: 0, baseline: 0 }
       const finished = wasRunning && !running
       wasRunning = running
       this.states.set(threadId, {
         running,
         unread: finished && this.viewed !== threadId ? state.unread + 1 : state.unread,
+        baseline: state.baseline,
       })
       this.notify()
     })

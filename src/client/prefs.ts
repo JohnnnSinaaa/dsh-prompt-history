@@ -30,6 +30,11 @@ export interface PluginPrefs {
    */
   promptCompletion: boolean
   /**
+   * Remind when the side chat and the main conversation touch the same files in
+   * parallel. Warning only: nothing is blocked.
+   */
+  writeGuard: boolean
+  /**
    * Experimental side chat: a second work thread in the right sidebar (docked
    * pane, split or floating) sharing this workspace. Off by default.
    */
@@ -53,6 +58,7 @@ const DEFAULTS: PluginPrefs = {
   promptCompletion: true,
   contextSuggest: true,
   sideChat: false,
+  writeGuard: true,
 }
 
 /** Current prefs; replaced on every setPref (stable snapshot identity). */
@@ -96,6 +102,7 @@ function migrate(parsed: unknown): PluginPrefs {
     promptCompletion: bool(source.promptCompletion, DEFAULTS.promptCompletion),
     contextSuggest: bool(source.contextSuggest, DEFAULTS.contextSuggest),
     sideChat: bool(source.sideChat, DEFAULTS.sideChat),
+    writeGuard: bool(source.writeGuard, DEFAULTS.writeGuard),
   }
 }
 

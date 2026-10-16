@@ -23,6 +23,7 @@ import { threads, type SideThread, type ThreadSnapshot, type ThreadObservable } 
 import { PromptComposer } from './panelComposer.tsx'
 import { insertIntoMain, quoteBlock, subscribeSideChatInsert } from './bridge.ts'
 import { flashCopied } from './feedback.ts'
+import { extractPaths, overlaps } from './guard.ts'
 import type { ChatRow } from './nodes.ts'
 
 /** Tab type identity (the body slot and the title seat are keyed by it). */
@@ -102,6 +103,16 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
   const running = useSyncExternalStore(runObs.subscribe.bind(runObs), runObs.getSnapshot.bind(runObs))
   const logRef = useRef<HTMLDivElement | null>(null)
 
+  // The guard compares what the visible thread touched with what the main
+  // conversation touched, so it needs both transcripts.
+  const mainSessionId = props.sessionId ?? ''
+  const mainRowsObs = mainSessionId === '' ? EMPTY_ROWS : threads.rowsOf(mainSessionId)
+  const mainRunObs = mainSessionId === '' ? EMPTY_RUNNING : threads.runningOf(mainSessionId)
+  const mainRows = useSyncExternalStore(mainRowsObs.subscribe.bind(mainRowsObs), mainRowsObs.getSnapshot.bind(mainRowsObs))
+  const mainRunning = useSyncExternalStore(mainRunObs.subscribe.bind(mainRunObs), mainRunObs.getSnapshot.bind(mainRunObs))
+  const anyThreadRunning = list.some((thread) => threads.stateOf(thread.id).running)
+  const guardOn = getPrefs().writeGuard && getPrefs().sideChat
+
   // The thread's own prompts are its history; its transcript is the prediction context.
   const history = useMemo(() => {
     const out: string[] = []
@@ -144,6 +155,16 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
       if (thread !== null) setActiveId(thread.id)
     })
   }
+
+  // Rows the thread itself produced (a fork's inherited history is excluded via
+  // the baseline captured when it started).
+  const baseline = active === null ? 0 : threads.stateOf(active.id).baseline
+  const ownRows = rows.slice(baseline)
+  const guard = useMemo(() => {
+    if (!guardOn || ownRows.length === 0 || mainRows.length === 0) return { parallel: false, clash: [] as string[] }
+    const clash = overlaps(extractPaths(ownRows.slice(-80)), extractPaths(mainRows.slice(-80)))
+    return { parallel: mainRunning && anyThreadRunning, clash }
+  }, [guardOn, ownRows, mainRows, mainRunning, anyThreadRunning])
 
   startRef.current = start
 
@@ -216,6 +237,20 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
           </button>
         )}
       </div>
+      {guardOn && (guard.clash.length > 0 || guard.parallel) && (
+        <div className={guard.clash.length > 0 ? 'dsh-ph-guard dsh-ph-guard--clash' : 'dsh-ph-guard'}>
+          {guard.clash.length > 0
+            ? (
+              <>
+                <span>{T('sideChat.guardClash')}</span>
+                <ul className="dsh-ph-guardList">
+                  {guard.clash.slice(0, 4).map((path) => <li key={path}>{path}</li>)}
+                </ul>
+              </>
+              )
+            : <span>{T('sideChat.guardParallel')}</span>}
+        </div>
+      )}
       <div className="dsh-ph-sidechat-strip">
         {list.map((thread) => {
           const state = snapshot.states.get(thread.id)
