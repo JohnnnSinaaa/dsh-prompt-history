@@ -9,6 +9,7 @@ import { useSyncExternalStore } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { getPrefs, setPref, subscribePrefs, type CopyMode } from './prefs.ts'
 import type { PromptHistoryKey } from './locales.ts'
+import { PLUGIN_VERSION } from './i18n.ts'
 
 /** Copy-mode options in display order (keys resolve through the locale seat). */
 const COPY_MODES: ReadonlyArray<{ value: CopyMode; label: PromptHistoryKey }> = [
@@ -21,7 +22,7 @@ export function SettingsSection({ t }: PropsLocale<'dsh-prompt-history'>): JSX.E
   const prefs = useSyncExternalStore(subscribePrefs, getPrefs)
   return (
     <div className="dsh-ph-settings">
-      <h4 className="dsh-ph-title">{t('settings.title')}（dsh-prompt-history）</h4>
+      <h4 className="dsh-ph-title">{t('settings.title')}（dsh-prompt-history v{PLUGIN_VERSION}）</h4>
 
       <p className="dsh-ph-group">{t('settings.copyGroup')}</p>
       {COPY_MODES.map((mode) => (

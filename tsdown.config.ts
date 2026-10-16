@@ -4,7 +4,11 @@
  * (react and the official @deepseek-ai platform packages) are resolved from
  * the browser module table, never bundled; everything else inlines.
  */
+import { readFileSync } from 'node:fs'
 import type { UserConfig } from 'tsdown'
+
+/** Package version, stamped into the client bundle for the settings header. */
+const VERSION = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version
 
 /** The plugin id stamped into the __ModuleLoader__.load handoff. */
 const ID = 'dsh-prompt-history'
@@ -46,6 +50,7 @@ export default [
     clean: false,
     external: EXTERNALS,
     define: {
+      __PH_VERSION__: JSON.stringify(VERSION),
       'process.env.NODE_ENV': JSON.stringify(NODE_ENV),
       'import.meta.env.MODE': JSON.stringify(NODE_ENV),
       'import.meta.env': JSON.stringify({ MODE: NODE_ENV }),

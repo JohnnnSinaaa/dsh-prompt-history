@@ -1,3 +1,7 @@
+// Build-stamped package version (see tsdown.config.ts).
+declare const __PH_VERSION__: string
+
+export const PLUGIN_VERSION: string = typeof __PH_VERSION__ === 'string' ? __PH_VERSION__ : 'dev'
 /**
  * Tiny module-level translator for non-React code (feedback pills, the
  * selection toolbar, the search overlay, the TOC grip). apply() installs the
