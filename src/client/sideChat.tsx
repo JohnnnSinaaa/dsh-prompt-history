@@ -21,6 +21,8 @@ import { NS } from './locales.ts'
 import { getPrefs, subscribePrefs } from './prefs.ts'
 import { threads, type SideThread, type ThreadSnapshot, type ThreadObservable } from './threads.ts'
 import { PromptComposer } from './panelComposer.tsx'
+import { insertIntoMain, quoteBlock, subscribeSideChatInsert } from './bridge.ts'
+import { flashCopied } from './feedback.ts'
 import type { ChatRow } from './nodes.ts'
 
 /** Tab type identity (the body slot and the title seat are keyed by it). */
@@ -114,6 +116,16 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
     [rows],
   )
 
+  // Quotes arriving from the main conversation land in this composer; if no
+  // thread exists yet, start one so the question has somewhere to go.
+  const startRef = useRef<(origin: 'fork' | 'blank') => void>(() => {})
+  useEffect(() => {
+    return subscribeSideChatInsert((text) => {
+      setDraft((previous) => (previous === '' ? text : `${previous}\n\n${text}`))
+      if (threads.list().length === 0) startRef.current('fork')
+    })
+  }, [])
+
   // The visible thread is read: drop its badge.
   useEffect(() => {
     threads.setViewed(active?.id ?? null)
@@ -133,11 +145,39 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
     })
   }
 
+  startRef.current = start
+
+  /**
+   * Hand this thread's conclusion back to the main composer: the last assistant
+   * answer when there is one, otherwise the tail of the transcript (a thread can
+   * still be mid-turn, and its tool output is often the useful part).
+   */
+  const sendToMain = (): void => {
+    const answer = [...rows].reverse().find((row) => row.role === 'assistant')
+    const text = answer?.text ?? rows.slice(-6).map((row) => `${row.role}: ${row.text}`).join('\n')
+    if (text.trim() === '') return
+    if (insertIntoMain(quoteBlock(text))) {
+      flashCopied(null, T('sideChat.sentToMain'))
+    }
+  }
+
   const submit = (): void => {
-    if (active === null || draft.trim() === '') return
+    if (draft.trim() === '') return
     const text = draft
+    const target = active
     setDraft('')
-    void threads.send(active, text)
+    if (target !== null) {
+      void threads.send(target, text)
+      return
+    }
+    // No thread yet: typing straight into the panel starts one, so a quote sent
+    // from the main conversation can be followed by the question immediately.
+    void threads.start('fork', sourceId, T('sideChat.origin.fork')).then((thread) => {
+      if (thread !== null) {
+        setActiveId(thread.id)
+        void threads.send(thread, text)
+      }
+    })
   }
 
   // Placement controls come from the shell: read this tab's record lazily and
@@ -163,6 +203,11 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
         {paneId !== undefined && (
           <button type="button" className="dsh-ph-iconButton" title={T('sideChat.dock')} onClick={() => { dockSideChatTab(paneId) }}>
             ⤓
+          </button>
+        )}
+        {rows.length > 0 && (
+          <button type="button" className="dsh-ph-iconButton" title={T('sideChat.sendToMain')} onClick={sendToMain}>
+            ⇧
           </button>
         )}
         {info?.tab?.actions?.close !== undefined && (

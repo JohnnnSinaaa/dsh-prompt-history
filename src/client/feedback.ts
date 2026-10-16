@@ -71,13 +71,14 @@ export function hideSelectionToolbar(): void {
 
 /**
  * Show the floating selection toolbar above the selection rect: 复制 copies
- * the current document selection; 引用 (when a handler is given) hands the
- * selection to the caller for insertion into the composer as a quote. Mousedown
- * is suppressed so the selection survives the click.
+ * the current document selection; 引用 hands the selection to the caller for
+ * insertion into the composer as a quote; 侧聊 sends it to the side chat.
+ * Mousedown is suppressed so the selection survives the click.
  * @param rect - the selection's bounding rect (toolbar sits above it).
  * @param onQuote - quote handler; renders the 引用 button only when provided.
+ * @param onSideChat - side-chat handler; renders the 侧聊 button only when provided.
  */
-export function showSelectionToolbar(rect: DOMRect, onQuote?: () => void): void {
+export function showSelectionToolbar(rect: DOMRect, onQuote?: () => void, onSideChat?: () => void): void {
   ensureToolbarStyle()
   hideSelectionToolbar()
   const copyButton = document.createElement('button')
@@ -103,7 +104,18 @@ export function showSelectionToolbar(rect: DOMRect, onQuote?: () => void): void 
     })
     el.appendChild(quoteButton)
   }
-  const W = onQuote !== undefined ? 116 : 64
+  if (onSideChat !== undefined) {
+    const sideButton = document.createElement('button')
+    sideButton.type = 'button'
+    sideButton.textContent = T('toolbar.sideChat')
+    sideButton.addEventListener('mousedown', (e) => { e.preventDefault() }) // keep the selection
+    sideButton.addEventListener('click', () => {
+      hideSelectionToolbar()
+      onSideChat()
+    })
+    el.appendChild(sideButton)
+  }
+  const W = 56 + (onQuote !== undefined ? 52 : 0) + (onSideChat !== undefined ? 52 : 0)
   const H = 30
   const x = Math.max(4, Math.min(rect.left + rect.width / 2 - W / 2, window.innerWidth - W - 4))
   const y = Math.max(4, rect.top - H - 4)

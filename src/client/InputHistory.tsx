@@ -54,6 +54,7 @@ import {
 import { completionEligible, matchCompletion } from './completion.ts'
 import { ghostVisible, hideGhost, showGhost } from './ghost.ts'
 import { buildContext, getActiveBridge } from './suggest.ts'
+import { insertIntoMain, quoteBlock, registerMainInserter, sendToSideChat } from './bridge.ts'
 import { hideSuggestion, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
 import { ChatToc } from './ChatToc.tsx'
 
@@ -211,6 +212,27 @@ export function InputHistory(props: InputHistoryProps) {
     if (suffix === null) { hideGhost(); return }
     showGhost(suffix, host)
   }, [])
+
+  // Let the side chat hand a conclusion back into this composer's draft.
+  useEffect(() => registerMainInserter((text) => {
+    const host = editorHost()
+    if (host === null) return false
+    const live = liveRef.current
+    const next = live.draft === '' ? text : `${live.draft}\n\n${text}`
+    const actions = live.inputActions as {
+      captureInsertion?: () => unknown
+      insertText?: (value: string, span: unknown) => boolean
+      setDraft?: (value: string) => void
+    }
+    if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+      try {
+        if (actions.insertText(`${live.draft === '' ? '' : '\n\n'}${text}`, actions.captureInsertion()) === true) return true
+      } catch { /* fall through to a draft write */ }
+    }
+    actions.setDraft?.(next)
+    setEditorCaret(host, next.length)
+    return true
+  }), [])
 
   // Any draft change re-arms the ghost (a dismissed ghost must not stick).
   useEffect(() => { dismissedRef.current = null }, [draft])
@@ -930,7 +952,14 @@ export function InputHistory(props: InputHistoryProps) {
           copySelection()
         } else {
           const rect = selectionRect()
-          if (rect !== null) showSelectionToolbar(rect, quoteSelection)
+          if (rect !== null) {
+            showSelectionToolbar(rect, quoteSelection, () => {
+              const selection = document.getSelection()
+              const text = selection !== null && !selection.isCollapsed ? selection.toString() : ''
+              if (text.trim() === '') return
+              sendToSideChat(quoteBlock(text))
+            })
+          }
         }
       }, 150)
     }
