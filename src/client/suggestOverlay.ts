@@ -11,7 +11,33 @@
 import { COMPOSER_CARD, editorHost, editorText } from './editor.ts'
 
 const CLASS = 'dsh-ph-suggest'
+/** Toggled on the composer card while a prediction is on screen. */
+const CARD_CLASS = 'dsh-ph-suggesting'
+/** The composer's own placeholder ("描述你想要构建的内容…"). */
+const PLACEHOLDER = '[data-composer-placeholder], [class*="placeholder"]'
 let node: HTMLDivElement | null = null
+/** Placeholders hidden for the current overlay, with their previous inline value. */
+let hiddenPlaceholders: Array<{ el: HTMLElement; prev: string }> = []
+
+/** Hide the composer placeholder (inline + via the card class for re-renders). */
+function hidePlaceholders(): void {
+  const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
+  card?.classList.add(CARD_CLASS)
+  for (const el of document.querySelectorAll<HTMLElement>(PLACEHOLDER)) {
+    // Re-showing for the same context must not record "hidden" as the value to
+    // restore (that would leave the placeholder permanently hidden).
+    if (el.style.visibility === 'hidden') continue
+    hiddenPlaceholders.push({ el, prev: el.style.visibility })
+    el.style.visibility = 'hidden'
+  }
+}
+
+/** Restore every placeholder this overlay hid. */
+function restorePlaceholders(): void {
+  document.querySelector<HTMLElement>(COMPOSER_CARD)?.classList.remove(CARD_CLASS)
+  for (const { el, prev } of hiddenPlaceholders) el.style.visibility = prev
+  hiddenPlaceholders = []
+}
 
 /** Create the overlay style tag once. */
 function ensureStyle(): void {
@@ -24,8 +50,19 @@ function ensureStyle(): void {
     `.${CLASS} .dsh-ph-suggest-text{color:var(--dsw-alias-label-primary);opacity:.42;}`,
     `.${CLASS} .dsh-ph-suggest-hint{color:var(--dsw-alias-label-primary);opacity:.3;}`,
     `.${CLASS} .dsh-ph-suggest-hint--block{display:block;}`,
+    // The composer's own hint must not sit under the prediction.
+    `[data-composer-card].${CARD_CLASS} [data-composer-placeholder],`,
+    `[data-composer-card].${CARD_CLASS} [class*="placeholder"]{visibility:hidden !important;}`,
   ].join('')
   document.head.appendChild(tag)
+}
+
+/**
+ * Install the overlay stylesheet. Called once from the plugin body so the
+ * placeholder-hiding rule exists even before the first prediction.
+ */
+export function installSuggestStyle(): void {
+  ensureStyle()
 }
 
 /** Is a suggestion currently on screen? */
@@ -35,6 +72,7 @@ export function suggestionVisible(): boolean {
 
 /** Remove the suggestion overlay (idempotent). */
 export function hideSuggestion(): void {
+  restorePlaceholders()
   if (node !== null) {
     node.remove()
     node = null
@@ -86,6 +124,7 @@ export function showSuggestion(text: string, hint: string, host: HTMLElement): b
     return false
   }
   ensureStyle()
+  hidePlaceholders()
   if (node === null) {
     node = document.createElement('div')
     node.className = CLASS

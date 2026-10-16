@@ -20,6 +20,7 @@ import { NS, en, zh } from './locales.ts'
 import { setTranslator, T } from './i18n.ts'
 import { installNavGlyph } from './navGlyph.ts'
 import { createBridge, mountContribution, setActiveBridge } from './suggest.ts'
+import { installSuggestStyle } from './suggestOverlay.ts'
 import { bindRootContext } from './sessionCtx.ts'
 
 /** Required services: the slot registry, the locale service. */
@@ -81,6 +82,8 @@ export function apply(ctx: ClientContext): void {
   // with loadOlder() from component code (no ctx there); the sessions service
   // is resolved lazily per call — it appears only after the host connection.
   bindRootContext(ctx)
+  // Style first: the suggestion overlay hides the composer's own placeholder.
+  installSuggestStyle()
 
   // The next-prompt suggestion needs the `remote` service: mount this
   // package's host face from an injected child context, then publish the
