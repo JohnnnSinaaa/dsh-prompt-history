@@ -60,10 +60,21 @@ const NO_ROWS: readonly ChatRow[] = []
 const EMPTY_ROWS: ThreadObservable<readonly ChatRow[]> = { getSnapshot: () => NO_ROWS, subscribe: () => () => {} }
 const EMPTY_RUNNING: ThreadObservable<boolean> = { getSnapshot: () => false, subscribe: () => () => {} }
 
+/** The tab information the sidebar's own hook exposes to a body. */
+interface TabInfoLike {
+  readonly panel?: { readonly id?: string }
+  readonly tab?: {
+    readonly id?: string
+    readonly actions?: { close?: () => void }
+  }
+}
+
 /** Standard props the session-scoped sidebar seat passes to a tab body. */
 interface SideChatBodyProps {
   /** The conversation the sidebar is showing; threads fork from it by default. */
   readonly sessionId?: string
+  /** Framework hook: this tab's record (id, actions) and its containing pane. */
+  readonly useTabInfo?: () => TabInfoLike
 }
 
 /** One conversation row. */
@@ -129,8 +140,37 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
     void threads.send(active, text)
   }
 
+  // Placement controls come from the shell: read this tab's record lazily and
+  // ignore anything the sidebar did not provide.
+  let info: TabInfoLike | undefined
+  try { info = props.useTabInfo?.() } catch { info = undefined }
+  const tabId = info?.tab?.id
+  const paneId = info?.panel?.id
+
   return (
     <div className="dsh-ph-sidechat">
+      <div className="dsh-ph-sidechat-head">
+        {tabId !== undefined && (
+          <button type="button" className="dsh-ph-iconButton" title={T('sideChat.float')} onClick={() => { floatSideChatTab(tabId) }}>
+            ⧉
+          </button>
+        )}
+        {paneId !== undefined && (
+          <button type="button" className="dsh-ph-iconButton" title={T('sideChat.split')} onClick={() => { splitSideChatTab(paneId) }}>
+            ◫
+          </button>
+        )}
+        {paneId !== undefined && (
+          <button type="button" className="dsh-ph-iconButton" title={T('sideChat.dock')} onClick={() => { dockSideChatTab(paneId) }}>
+            ⤓
+          </button>
+        )}
+        {info?.tab?.actions?.close !== undefined && (
+          <button type="button" className="dsh-ph-iconButton" title={T('sideChat.closeTab')} onClick={() => { info?.tab?.actions?.close?.() }}>
+            ✕
+          </button>
+        )}
+      </div>
       <div className="dsh-ph-sidechat-strip">
         {list.map((thread) => {
           const state = snapshot.states.get(thread.id)
@@ -252,6 +292,27 @@ export function openSideChat(thread = 't1'): void {
     preferNewPane: true,
     revealIfOpened: true,
   })
+}
+
+/**
+ * Float the tab into its own panel (the shell owns the mechanics).
+ * @param tabId - this tab's id from `useTabInfo`.
+ */
+export function floatSideChatTab(tabId: string): void {
+  try { serviceCtx?.sidebarRight.float(tabId as never) } catch { /* placement refused */ }
+}
+
+/** Return a floating panel to the docked column. */
+export function dockSideChatTab(paneId: string): void {
+  try { serviceCtx?.sidebarRight.dock(paneId as never) } catch { /* not floating */ }
+}
+
+/**
+ * Split the pane holding this tab and seed the new pane.
+ * @param paneId - the containing pane from `useTabInfo`.
+ */
+export function splitSideChatTab(paneId: string): void {
+  try { serviceCtx?.sidebarRight.split(paneId as never) } catch { /* split unavailable */ }
 }
 
 /** Whether the sidebar bridge is ready (the settings button uses it). */
