@@ -216,7 +216,7 @@ export function InputHistory(props: InputHistoryProps) {
   useEffect(() => { dismissedRef.current = null }, [draft])
 
   // ---- context suggestion (Codex-style predicted next prompt) ----
-  /** Last accepted prediction: keyed by the context it was made from. */
+  /** Last prediction, keyed by session + context so it never crosses sessions. */
   const suggestRef = useRef<{ key: string; text: string } | null>(null)
   /** Context the user dismissed with Escape (suppressed until it changes). */
   const suggestDismissedRef = useRef<string | null>(null)
@@ -277,6 +277,9 @@ export function InputHistory(props: InputHistoryProps) {
         return
       }
       if (context.trim() === '') {
+        // Nothing readable yet (fresh session): never keep another context's
+        // prediction on screen while we wait for rows to render.
+        hideSuggestion()
         attempts += 1
         // A freshly opened session can take a while to paint its rows; empty
         // reads cost nothing, so keep watching for up to ~24s.
@@ -285,7 +288,7 @@ export function InputHistory(props: InputHistoryProps) {
         return
       }
       if (suggestDismissedRef.current === context) { suggestPendingRef.current = false; return }
-      const key = context.slice(-600)
+      const key = `${sessionId}:${context.slice(-600)}`
       if (suggestRef.current?.key !== key) emptyTriesRef.current = 0
       const cached = suggestRef.current
       if (cached !== null && cached.key === key) {
@@ -316,6 +319,16 @@ export function InputHistory(props: InputHistoryProps) {
     }
     suggestTimerRef.current = window.setTimeout(attempt, 300)
   }, [clearSuggestion])
+
+  // A suggestion belongs to one conversation: switching sessions (or starting a
+  // new one) must drop it immediately instead of showing the previous session's
+  // prediction in every view.
+  useEffect(() => {
+    suggestRef.current = null
+    suggestDismissedRef.current = null
+    emptyTriesRef.current = 0
+    clearSuggestion()
+  }, [sessionId, clearSuggestion])
 
   // Triggers: the empty composer gaining focus, and each turn that just ended.
   useEffect(() => {
