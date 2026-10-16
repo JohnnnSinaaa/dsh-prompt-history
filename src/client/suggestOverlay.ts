@@ -18,6 +18,35 @@ const PLACEHOLDER = '[data-composer-placeholder], [class*="placeholder"]'
 let node: HTMLDivElement | null = null
 /** Placeholders hidden for the current overlay, with their previous inline value. */
 let hiddenPlaceholders: Array<{ el: HTMLElement; prev: string }> = []
+/** Self-healing re-hide timer (the composer card can be remounted). */
+let rehideTimer: number | null = null
+
+/**
+ * Keep re-applying the placeholder hiding while the overlay is on screen.
+ *
+ * Opening the app mounts the composer in stages: the card (and its placeholder)
+ * can be replaced right after the first prediction, which would drop the class
+ * and reveal the placeholder under the ghost. A light poll is cheaper and more
+ * robust here than observing every mount point.
+ */
+function startRehide(): void {
+  if (rehideTimer !== null) return
+  rehideTimer = window.setInterval(() => {
+    if (node === null) {
+      stopRehide()
+      return
+    }
+    hidePlaceholders()
+  }, 400)
+}
+
+/** Stop the self-healing poll. */
+function stopRehide(): void {
+  if (rehideTimer !== null) {
+    window.clearInterval(rehideTimer)
+    rehideTimer = null
+  }
+}
 
 /** Hide the composer placeholder (inline + via the card class for re-renders). */
 function hidePlaceholders(): void {
@@ -72,6 +101,7 @@ export function suggestionVisible(): boolean {
 
 /** Remove the suggestion overlay (idempotent). */
 export function hideSuggestion(): void {
+  stopRehide()
   restorePlaceholders()
   if (node !== null) {
     node.remove()
@@ -125,6 +155,7 @@ export function showSuggestion(text: string, hint: string, host: HTMLElement): b
   }
   ensureStyle()
   hidePlaceholders()
+  startRehide()
   if (node === null) {
     node = document.createElement('div')
     node.className = CLASS
