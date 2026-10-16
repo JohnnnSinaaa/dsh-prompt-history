@@ -899,13 +899,18 @@ export function InputHistory(props: InputHistoryProps) {
       if (live.phase === 'adjudicating' || live.phase === 'submitting' || live.removed) return
       const host = editorHost()
       if (host === null) return
-      const hostFocused = document.activeElement === host
+      // Where the selection LIVES decides which reader to use — not which
+      // element has focus. The composer keeps focus after sending, so a user
+      // selecting a message and pressing 引用 would otherwise have the empty
+      // in-composer selection read instead and nothing would happen.
+      const sel = document.getSelection()
+      const selectionInHost = sel !== null && sel.rangeCount > 0 && sel.anchorNode !== null && host.contains(sel.anchorNode)
+      const hostFocused = selectionInHost
       let text = ''
-      if (hostFocused) {
+      if (selectionInHost) {
         text = editorSelectedText(host)
-      } else {
-        const sel = document.getSelection()
-        if (sel !== null && !sel.isCollapsed) text = sel.toString()
+      } else if (sel !== null && !sel.isCollapsed) {
+        text = sel.toString()
       }
       if (text.trim() === '') return
       // A plain markdown blockquote (each line prefixed with '> '), matching
