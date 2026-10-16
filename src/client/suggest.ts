@@ -132,9 +132,6 @@ export function createBridge(ctx: unknown): SuggestBridge | null {
   return {
     async fetch(context: string, signal?: AbortSignal): Promise<string> {
       try {
-        // The carrier validates the argument list against the descriptor's
-        // parameters, so an undefined trailing signal must not be sent. The
-        // method is invoked on its owner: the host method reads `this.ctx`.
         // The carrier validates the argument count against the descriptor, so
         // the business argument is the only one sent; cancellation is honoured
         // by discarding the result (the caller checks its own signal).
@@ -147,8 +144,12 @@ export function createBridge(ctx: unknown): SuggestBridge | null {
         const value = raw !== undefined && typeof raw === 'object' && 'ok' in raw
           ? (raw.ok ? raw.value : undefined)
           : raw
-        const text = typeof value?.text === 'string' ? value.text.trim() : ''
-        return text
+        const answer = typeof value?.text === 'string' ? value.text.trim() : ''
+        // The conversation often discusses this feature, so the model may append
+        // its own "按 Tab 接受" instruction; it is UI copy, never user content.
+        return answer
+          .replace(/[\s，,。.；;：:]*按?\s*(?:Tab|tab)\s*(?:键)?\s*(?:接受|确认|补全|采纳)[。.!！]?\s*$/u, '')
+          .trim()
       } catch (error) {
         // Offline host, rate limit, cancelled call: simply no suggestion.
         return ''

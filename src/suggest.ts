@@ -63,6 +63,7 @@ const SYSTEM = [
   "You predict the user's next message in a coding-assistant conversation.",
   'Reply with that message only: a single line, no quotes, no explanation, no code fence.',
   'Match the language the user writes in and keep it under 160 characters.',
+  'Never mention UI mechanics such as pressing Tab or accepting a suggestion.',
   'If the conversation suggests no clear next step, reply with nothing at all.',
 ].join(' ')
 

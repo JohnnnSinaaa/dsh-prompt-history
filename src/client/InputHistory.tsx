@@ -326,6 +326,12 @@ export function InputHistory(props: InputHistoryProps) {
       requestSuggestion()
     }
     card.addEventListener('focusin', onFocusIn)
+    // Any edit means the composer is no longer empty: drop the suggestion at the
+    // DOM level so it can never be painted over what the user is typing.
+    const onEdit = (): void => { clearSuggestion() }
+    card.addEventListener('beforeinput', onEdit, true)
+    card.addEventListener('input', onEdit, true)
+    card.addEventListener('paste', onEdit, true)
     // Conversation rows render after the node update; observing the scrollport
     // is what makes a freshly opened session (and every finished turn) predict.
     const scrollport = document.querySelector('[data-conversation-scroll]') ?? document.body
@@ -333,9 +339,12 @@ export function InputHistory(props: InputHistoryProps) {
     observer.observe(scrollport, { childList: true, subtree: true, characterData: true })
     return () => {
       card.removeEventListener('focusin', onFocusIn)
+      card.removeEventListener('beforeinput', onEdit, true)
+      card.removeEventListener('input', onEdit, true)
+      card.removeEventListener('paste', onEdit, true)
       observer.disconnect()
     }
-  }, [requestSuggestion])
+  }, [requestSuggestion, clearSuggestion])
 
   // The composer being empty and the session idle is the precondition; the
   // effect also re-runs whenever conversation nodes arrive (a freshly opened

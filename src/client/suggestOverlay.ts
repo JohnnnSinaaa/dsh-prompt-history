@@ -8,7 +8,7 @@
  *
  * @module dsh-prompt-history/client/suggestOverlay
  */
-import { COMPOSER_CARD, editorHost } from './editor.ts'
+import { COMPOSER_CARD, editorHost, editorText } from './editor.ts'
 
 const CLASS = 'dsh-ph-suggest'
 let node: HTMLDivElement | null = null
@@ -75,6 +75,11 @@ export function showSuggestion(text: string, hint: string, host: HTMLElement): b
     hideSuggestion()
     return false
   }
+  // Guard against a lagging draft state: never paint over real input.
+  if (editorText(host).trim() !== '') {
+    hideSuggestion()
+    return false
+  }
   const box = editorBox(host)
   if (box === null) {
     hideSuggestion()
@@ -95,13 +100,18 @@ export function showSuggestion(text: string, hint: string, host: HTMLElement): b
   textEl.textContent = text
   const hintEl = document.createElement('span')
   hintEl.className = 'dsh-ph-suggest-hint'
+  // The prediction may itself mention Tab (the conversation talks about it);
+  // never repeat the hint in that case.
+  const showHint = hint !== '' && !/tab/i.test(text)
   // A block hint needs a second line of room inside the composer.
   const block = box.height >= box.line * 2.1
-  if (block) {
+  if (!showHint) {
+    hintEl.textContent = ''
+  } else if (block) {
     hintEl.classList.add('dsh-ph-suggest-hint--block')
     hintEl.textContent = hint
   } else {
-    hintEl.textContent = hint === '' ? '' : ` ${hint}`
+    hintEl.textContent = ` ${hint}`
   }
   node.append(textEl, hintEl)
   node.style.font = style.font === '' ? 'inherit' : style.font
