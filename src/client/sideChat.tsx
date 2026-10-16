@@ -323,6 +323,14 @@ function installSideChat(ctx: ClientContext): () => void {
     keepMounted: true,
     priority: 'extension',
     title: () => T('sideChat.title'),
+    // Listed by the sidebar's own add-tab guide, so the panel is reachable
+    // without going through this plugin's settings.
+    guide: [{
+      id: 'open',
+      order: 30,
+      title: () => T('sideChat.title'),
+      description: () => T('sideChat.guideDesc'),
+    }],
   }), 'dsh-prompt-history: side-chat type')
   const disposeBody = ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
     { name: 'sidebar.right.pane.tab', key: SIDE_CHAT_ID, locale: NS },
@@ -362,8 +370,8 @@ export function bindSideChat(ctx: ClientContext): void {
  * Open (or reveal) a side-chat tab.
  * @param thread - thread identity passed to the body as navigation params.
  */
-export function openSideChat(thread = 't1'): void {
-  if (serviceCtx === null) return
+export function openSideChat(thread = 't1'): boolean {
+  if (serviceCtx === null || !getPrefs().sideChat) return false
   // DSH types tab params through a merge-extensible map declared inside the
   // sidebar package, which a kind registered from outside cannot augment; the
   // payload is ours and validated by the body, so it crosses untyped.
@@ -372,6 +380,7 @@ export function openSideChat(thread = 't1'): void {
     preferNewPane: true,
     revealIfOpened: true,
   })
+  return true
 }
 
 /**

@@ -12,6 +12,8 @@
  * @module dsh-prompt-history/client/bridge
  */
 import { openSideChat } from './sideChat.tsx'
+import { flashCopied } from './feedback.ts'
+import { T } from './i18n.ts'
 
 /** Format selection text as a plain markdown blockquote (the plugin's quote style). */
 export function quoteBlock(text: string): string {
@@ -60,7 +62,11 @@ const pending: string[] = []
  */
 export function sendToSideChat(text: string): void {
   if (text.trim() === '') return
-  openSideChat()
+  if (!openSideChat()) {
+    // Silently dropping the click is the one thing a user cannot recover from.
+    flashCopied(null, T('sideChat.disabledHint'))
+    return
+  }
   if (panelListeners.size === 0) {
     pending.push(text)
     return
