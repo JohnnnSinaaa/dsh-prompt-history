@@ -12,13 +12,15 @@
  *
  * @module dsh-prompt-history/client/sideChat
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the Context merge (ctx.sidebarRight / ctx.sidebarRightTabs).
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { T } from './i18n.ts'
 import { NS } from './locales.ts'
 import { getPrefs, subscribePrefs } from './prefs.ts'
+import { threads, type SideThread, type ThreadObservable } from './threads.ts'
+import type { ChatRow } from './nodes.ts'
 
 /** Tab type identity (the body slot and the title seat are keyed by it). */
 export const SIDE_CHAT_ID = 'dsh-prompt-history.side-chat'
@@ -34,26 +36,116 @@ interface Thread {
   readonly title: string
 }
 
+/** Stable fallbacks so the body's hooks are unconditional. */
+const NO_ROWS: readonly ChatRow[] = []
+const EMPTY_ROWS: ThreadObservable<readonly ChatRow[]> = { getSnapshot: () => NO_ROWS, subscribe: () => () => {} }
+const EMPTY_RUNNING: ThreadObservable<boolean> = { getSnapshot: () => false, subscribe: () => () => {} }
+
+/** Standard props the session-scoped sidebar seat passes to a tab body. */
+interface SideChatBodyProps {
+  /** The conversation the sidebar is showing; threads fork from it by default. */
+  readonly sessionId?: string
+}
+
+/** One conversation row. */
+function Row({ row }: { readonly row: ChatRow }): JSX.Element {
+  return (
+    <div className={`dsh-ph-sidechat-row dsh-ph-sidechat-row--${row.role}`}>
+      <span className="dsh-ph-sidechat-role">{row.role}</span>
+      <span className="dsh-ph-sidechat-text">{row.text}</span>
+    </div>
+  )
+}
+
 /** The tab body: thread strip, conversation area and composer. */
-function SideChatBody(): JSX.Element {
-  const [threads] = useState<readonly Thread[]>([{ id: 't1', title: T('sideChat.thread1') }])
-  const [active, setActive] = useState('t1')
+function SideChatBody(props: SideChatBodyProps): JSX.Element {
+  const list = useSyncExternalStore(threads.subscribe.bind(threads), threads.list.bind(threads))
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const active: SideThread | null = list.find((thread) => thread.id === activeId) ?? list[list.length - 1] ?? null
+  const rowsObs = active === null ? EMPTY_ROWS : threads.rowsOf(active.sessionId)
+  const runObs = active === null ? EMPTY_RUNNING : threads.runningOf(active.sessionId)
+  const rows = useSyncExternalStore(rowsObs.subscribe.bind(rowsObs), rowsObs.getSnapshot.bind(rowsObs))
+  const running = useSyncExternalStore(runObs.subscribe.bind(runObs), runObs.getSnapshot.bind(runObs))
+  const logRef = useRef<HTMLDivElement | null>(null)
+
+  // Follow the tail as the turn streams in.
+  useEffect(() => {
+    const log = logRef.current
+    if (log !== null) log.scrollTop = log.scrollHeight
+  }, [rows.length, active?.id])
+
+  const sourceId = props.sessionId ?? ''
+  const start = (origin: 'fork' | 'blank'): void => {
+    const title = origin === 'fork'
+      ? `${T('sideChat.origin.fork')} ${list.length + 1}`
+      : `${T('sideChat.origin.blank')} ${list.length + 1}`
+    void threads.start(origin, sourceId, title).then((thread) => {
+      if (thread !== null) setActiveId(thread.id)
+    })
+  }
+
+  const submit = (): void => {
+    if (active === null || draft.trim() === '') return
+    const text = draft
+    setDraft('')
+    void threads.send(active, text)
+  }
+
   return (
     <div className="dsh-ph-sidechat">
       <div className="dsh-ph-sidechat-strip">
-        {threads.map((thread) => (
-          <button
-            key={thread.id}
-            type="button"
-            className={thread.id === active ? 'dsh-ph-sidechat-chip dsh-ph-sidechat-chip--on' : 'dsh-ph-sidechat-chip'}
-            onClick={() => { setActive(thread.id) }}
-          >
-            {thread.title}
-          </button>
+        {list.map((thread) => (
+          <span key={thread.id} className={thread.id === active?.id ? 'dsh-ph-sidechat-chip dsh-ph-sidechat-chip--on' : 'dsh-ph-sidechat-chip'}>
+            <button type="button" className="dsh-ph-sidechat-chipLabel" onClick={() => { setActiveId(thread.id) }}>
+              {thread.title}
+            </button>
+            <button type="button" className="dsh-ph-sidechat-chipClose" aria-label={T('sideChat.close')} onClick={() => { threads.close(thread.id) }}>
+              ×
+            </button>
+          </span>
         ))}
+        <button type="button" className="dsh-ph-sidechat-chip" onClick={() => { start('fork') }}>
+          ＋{T('sideChat.newFork')}
+        </button>
+        <button type="button" className="dsh-ph-sidechat-chip" onClick={() => { start('blank') }}>
+          ＋{T('sideChat.newBlank')}
+        </button>
       </div>
-      <div className="dsh-ph-sidechat-log">
-        <p className="dsh-ph-sidechat-empty">{T('sideChat.placeholder')}</p>
+
+      <div className="dsh-ph-sidechat-log" ref={logRef}>
+        {active === null
+          ? <p className="dsh-ph-sidechat-empty">{T('sideChat.empty')}</p>
+          : rows.length === 0
+            ? <p className="dsh-ph-sidechat-empty">{T('sideChat.placeholder')}</p>
+            : rows.map((row) => <Row key={`${row.key}:${row.text.length}`} row={row} />)}
+      </div>
+
+      <div className="dsh-ph-sidechat-compose">
+        <textarea
+          className="dsh-ph-sidechat-input"
+          rows={2}
+          value={draft}
+          placeholder={T('sideChat.input')}
+          onChange={(event) => { setDraft(event.target.value) }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault()
+              submit()
+            }
+          }}
+        />
+        {running
+          ? (
+            <button type="button" className="dsh-ph-button" onClick={() => { if (active !== null) void threads.cancel(active) }}>
+              {T('sideChat.stop')}
+            </button>
+            )
+          : (
+            <button type="button" className="dsh-ph-button" onClick={submit}>
+              {T('sideChat.send')}
+            </button>
+            )}
       </div>
     </div>
   )

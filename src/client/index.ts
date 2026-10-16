@@ -64,6 +64,18 @@ const SETTINGS_CSS = [
   '.dsh-ph-sidechat-chip--on{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);}',
   '.dsh-ph-sidechat-log{flex:1 1 auto;min-height:0;overflow-y:auto;border-radius:8px;border:1px dashed var(--dsw-alias-border-l1);padding:10px;}',
   '.dsh-ph-sidechat-empty{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary);}',
+  '.dsh-ph-sidechat-chipLabel{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:0;}',
+  '.dsh-ph-sidechat-chipClose{border:0;background:transparent;color:inherit;cursor:pointer;opacity:.6;font-size:12px;padding:0 0 0 6px;}',
+  '.dsh-ph-sidechat-chipClose:hover{opacity:1;}',
+  '.dsh-ph-sidechat-row{display:flex;gap:8px;padding:6px 2px;border-bottom:1px solid var(--dsw-alias-border-l1);}',
+  '.dsh-ph-sidechat-row:last-child{border-bottom:0;}',
+  '.dsh-ph-sidechat-role{flex:0 0 62px;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--dsw-alias-label-tertiary);}',
+  '.dsh-ph-sidechat-text{flex:1 1 auto;min-width:0;white-space:pre-wrap;word-break:break-word;font-size:12px;color:var(--dsw-alias-label-primary);}',
+  '.dsh-ph-sidechat-row--tool .dsh-ph-sidechat-text{color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;}',
+  '.dsh-ph-sidechat-row--user .dsh-ph-sidechat-text{color:var(--dsw-alias-label-primary);}',
+  '.dsh-ph-sidechat-compose{display:flex;gap:6px;align-items:flex-end;flex:0 0 auto;}',
+  '.dsh-ph-sidechat-input{flex:1 1 auto;min-width:0;resize:vertical;border-radius:6px;border:1px solid var(--dsw-alias-border-l1);',
+  'background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:12px system-ui,sans-serif;padding:6px 8px;}',
 ].join('')
 
 /**

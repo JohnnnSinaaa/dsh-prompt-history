@@ -22,6 +22,11 @@ export function bindRootContext(ctx: ClientContext): void {
   rootContext = ctx
 }
 
+/** The captured root context, or undefined before apply ran. */
+export function rootContextOrNull(): ClientContext | undefined {
+  return rootContext
+}
+
 /** Pull one older history page for `sessionId`; true when a page was pulled. */
 export async function pullOlderPage(sessionId: SessionId): Promise<boolean> {
   const sessions = rootContext?.get('sessions') as ISessions | undefined

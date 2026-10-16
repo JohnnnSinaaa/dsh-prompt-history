@@ -59,3 +59,58 @@ export function promptMessage(node: unknown): PromptMessage | null {
   if (trimmed === '') return null
   return { kind: n.kind as string, seq: nodeSeq(n), text: trimmed }
 }
+
+/** One rendered conversation row: the role decides the bubble, text is its body. */
+export interface ChatRow {
+  readonly role: 'user' | 'assistant' | 'tool' | 'other'
+  /** Stable identity for React keys (node seq, 0 when unknown). */
+  readonly key: number
+  readonly text: string
+}
+
+/** The ordered node array out of whichever chat snapshot shape is present. */
+export function snapshotNodes(snapshot: unknown): readonly unknown[] {
+  const snap = snapshot as { order?: unknown; nodes?: unknown; legacy?: { nodes?: unknown } } | null | undefined
+  if (snap === null || snap === undefined) return []
+  const legacy = snap.legacy?.nodes
+  if (Array.isArray(legacy)) return legacy
+  const store = snap.nodes as { get?: (key: string) => unknown } | undefined
+  if (Array.isArray(snap.order) && store !== undefined && typeof store.get === 'function') {
+    return snap.order.map((key) => store.get?.(key)).filter((node) => node !== null && node !== undefined)
+  }
+  return Array.isArray(snap.nodes) ? snap.nodes : []
+}
+
+/** Map one node kind onto the row role the side-chat log draws. */
+function rowRole(kind: unknown): ChatRow['role'] {
+  if (kind === 'user' || kind === 'steering') return 'user'
+  if (kind === 'assistant') return 'assistant'
+  if (typeof kind === 'string' && (kind.startsWith('tool') || kind.includes('call') || kind.includes('result'))) return 'tool'
+  return 'other'
+}
+
+/**
+ * Flatten assembled conversation nodes into the rows a compact log renders.
+ *
+ * Works for every generation because the text extraction above already handles
+ * `content` and `data.content`; empty rows (pure containers) are skipped.
+ * @param nodes - the ordered node array from a chat snapshot.
+ * @returns the rows, oldest first.
+ */
+export function chatRows(nodes: readonly unknown[]): readonly ChatRow[] {
+  const rows: ChatRow[] = []
+  for (const node of nodes) {
+    const n = node as NodeLike | null | undefined
+    if (n === null || n === undefined) continue
+    let text = ''
+    for (const block of textBlocks(n) as ReadonlyArray<{ type?: unknown; text?: unknown }>) {
+      if (block !== null && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string') {
+        text += block.text
+      }
+    }
+    const trimmed = text.trim()
+    if (trimmed === '') continue
+    rows.push({ role: rowRole(n.kind), key: nodeSeq(n), text: trimmed })
+  }
+  return rows
+}
