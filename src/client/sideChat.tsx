@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { T } from './i18n.ts'
 import { NS } from './locales.ts'
 import { getPrefs, subscribePrefs } from './prefs.ts'
-import { threads, type SideThread, type ThreadObservable } from './threads.ts'
+import { threads, type SideThread, type ThreadSnapshot, type ThreadObservable } from './threads.ts'
 import { PromptComposer } from './panelComposer.tsx'
 import type { ChatRow } from './nodes.ts'
 
@@ -35,6 +35,24 @@ let serviceCtx: ClientContext | null = null
 interface Thread {
   readonly id: string
   readonly title: string
+}
+
+/** Read the thread snapshot (the list plus each thread's badges). */
+function useThreadSnapshot(): ThreadSnapshot {
+  return useSyncExternalStore(threads.subscribe.bind(threads), threads.snapshot.bind(threads))
+}
+
+/** The sidebar tab chip: the title plus the aggregate badges. */
+function SideChatTitle(): JSX.Element {
+  useThreadSnapshot()
+  const unread = threads.unreadTotal()
+  return (
+    <span className="dsh-ph-sidechat-title">
+      {T('sideChat.title')}
+      {unread > 0 && <span className="dsh-ph-sidechat-badge" aria-label={`${T('sideChat.unread')} ${unread}`}>{unread}</span>}
+      {unread === 0 && threads.anyRunning() && <span className="dsh-ph-sidechat-running" aria-label={T('sideChat.running')}>⟳</span>}
+    </span>
+  )
 }
 
 /** Stable fallbacks so the body's hooks are unconditional. */
@@ -60,7 +78,8 @@ function Row({ row }: { readonly row: ChatRow }): JSX.Element {
 
 /** The tab body: thread strip, conversation area and composer. */
 function SideChatBody(props: SideChatBodyProps): JSX.Element {
-  const list = useSyncExternalStore(threads.subscribe.bind(threads), threads.list.bind(threads))
+  const snapshot = useThreadSnapshot()
+  const list = snapshot.threads
   const [activeId, setActiveId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const active: SideThread | null = list.find((thread) => thread.id === activeId) ?? list[list.length - 1] ?? null
@@ -84,6 +103,11 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
     [rows],
   )
 
+  // The visible thread is read: drop its badge.
+  useEffect(() => {
+    threads.setViewed(active?.id ?? null)
+  }, [active?.id, snapshot])
+
   // Follow the tail as the turn streams in.
   useEffect(() => {
     const log = logRef.current
@@ -92,10 +116,8 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
 
   const sourceId = props.sessionId ?? ''
   const start = (origin: 'fork' | 'blank'): void => {
-    const title = origin === 'fork'
-      ? `${T('sideChat.origin.fork')} ${list.length + 1}`
-      : `${T('sideChat.origin.blank')} ${list.length + 1}`
-    void threads.start(origin, sourceId, title).then((thread) => {
+    const label = origin === 'fork' ? T('sideChat.origin.fork') : T('sideChat.origin.blank')
+    void threads.start(origin, sourceId, label).then((thread) => {
       if (thread !== null) setActiveId(thread.id)
     })
   }
@@ -110,16 +132,21 @@ function SideChatBody(props: SideChatBodyProps): JSX.Element {
   return (
     <div className="dsh-ph-sidechat">
       <div className="dsh-ph-sidechat-strip">
-        {list.map((thread) => (
+        {list.map((thread) => {
+          const state = snapshot.states.get(thread.id)
+          return (
           <span key={thread.id} className={thread.id === active?.id ? 'dsh-ph-sidechat-chip dsh-ph-sidechat-chip--on' : 'dsh-ph-sidechat-chip'}>
             <button type="button" className="dsh-ph-sidechat-chipLabel" onClick={() => { setActiveId(thread.id) }}>
+              {state?.running === true && <span className="dsh-ph-sidechat-running" aria-label={T('sideChat.running')}>⟳ </span>}
               {thread.title}
+              {state !== undefined && state.unread > 0 && <span className="dsh-ph-sidechat-badge">{state.unread}</span>}
             </button>
             <button type="button" className="dsh-ph-sidechat-chipClose" aria-label={T('sideChat.close')} onClick={() => { threads.close(thread.id) }}>
               ×
             </button>
           </span>
-        ))}
+          )
+        })}
         <button type="button" className="dsh-ph-sidechat-chip" onClick={() => { start('fork') }}>
           ＋{T('sideChat.newFork')}
         </button>
@@ -181,7 +208,12 @@ function installSideChat(ctx: ClientContext): () => void {
     { name: 'sidebar.right.pane.tab', key: SIDE_CHAT_ID, locale: NS },
     SideChatBody,
   )), 'dsh-prompt-history: side-chat body')
+  const disposeTitle = ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register(
+    { name: 'sidebar.right.pane.tab.title', key: SIDE_CHAT_ID, locale: NS },
+    SideChatTitle,
+  )), 'dsh-prompt-history: side-chat title')
   return () => {
+    disposeTitle()
     disposeBody()
     disposeType()
   }

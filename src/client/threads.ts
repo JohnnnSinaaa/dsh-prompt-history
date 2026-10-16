@@ -27,6 +27,20 @@ export interface SideThread {
   readonly title: string
 }
 
+/** Per-thread live state the chips badge. */
+export interface ThreadState {
+  /** A turn is producing right now. */
+  readonly running: boolean
+  /** Turns that finished while this thread was not the one on screen. */
+  readonly unread: number
+}
+
+/** The panel's snapshot: the thread list plus each thread's live state. */
+export interface ThreadSnapshot {
+  readonly threads: readonly SideThread[]
+  readonly states: ReadonlyMap<string, ThreadState>
+}
+
 /** A minimal observable: React reads it through useSyncExternalStore. */
 export interface ThreadObservable<T> {
   getSnapshot(): T
@@ -78,7 +92,11 @@ class ThreadStore {
   private readonly rows = new Map<string, ThreadObservable<readonly ChatRow[]>>()
   private readonly turn = new Map<string, ThreadObservable<boolean>>()
   private readonly listeners = new Set<() => void>()
+  private readonly states = new Map<string, ThreadState>()
+  private readonly watchers = new Map<string, () => void>()
+  private viewed: string | null = null
   private sequence = 0
+  private cache: ThreadSnapshot = { threads: [], states: new Map() }
 
   /** The lazy `sessions` service, or undefined before the host connection. */
   private sessions(): SessionsLike | undefined {
@@ -95,6 +113,42 @@ class ThreadStore {
     return this.threads
   }
 
+  /** Stable snapshot of threads and their live state. */
+  snapshot(): ThreadSnapshot {
+    return this.cache
+  }
+
+  /** State of one thread (never undefined for a known id). */
+  stateOf(threadId: string): ThreadState {
+    return this.states.get(threadId) ?? { running: false, unread: 0 }
+  }
+
+  /** Total unread completions, for the sidebar tab chip. */
+  unreadTotal(): number {
+    let total = 0
+    for (const state of this.states.values()) total += state.unread
+    return total
+  }
+
+  /** Whether any thread is producing right now. */
+  anyRunning(): boolean {
+    for (const state of this.states.values()) if (state.running) return true
+    return false
+  }
+
+  /**
+   * Mark the thread the user is looking at: it stops being unread.
+   * @param threadId - the on-screen thread, or null when the panel shows none.
+   */
+  setViewed(threadId: string | null): void {
+    this.viewed = threadId
+    if (threadId === null) return
+    const state = this.states.get(threadId)
+    if (state === undefined || state.unread === 0) return
+    this.states.set(threadId, { ...state, unread: 0 })
+    this.notify()
+  }
+
   /** Subscribe to the thread list. */
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
@@ -103,6 +157,7 @@ class ThreadStore {
 
   /** Notify the panel that the thread list changed. */
   private notify(): void {
+    this.cache = { threads: [...this.threads], states: new Map(this.states) }
     for (const listener of [...this.listeners]) {
       try { listener() } catch { /* one faulty listener must not starve the others */ }
     }
@@ -112,10 +167,10 @@ class ThreadStore {
    * Start a thread: fork the source session (full context) or create a blank one.
    * @param origin - fork inherits the whole conversation; blank starts empty.
    * @param sourceSessionId - the conversation to fork from (required for 'fork').
-   * @param title - the panel label.
+   * @param label - the panel label the thread is numbered under.
    * @returns the created thread, or null when the services are unavailable.
    */
-  async start(origin: ThreadOrigin, sourceSessionId: string, title: string): Promise<SideThread | null> {
+  async start(origin: ThreadOrigin, sourceSessionId: string, label: string): Promise<SideThread | null> {
     const sessions = this.sessions()
     if (sessions === undefined) return null
     try {
@@ -123,15 +178,19 @@ class ThreadStore {
         ? await sessions.fork({ sessionId: sourceSessionId })
         : await sessions.create({})
       const reference = sessions.retain(sessionId, { source: 'dsh-prompt-history.side-chat' })
+      // Number here, not in the caller: two quick creations would both read the
+      // pre-push list length and collide on the same title.
       this.sequence += 1
       const thread: SideThread = {
         id: `t${this.sequence}`,
         sessionId,
         origin,
-        title,
+        title: `${label} ${this.sequence}`,
       }
       this.refs.set(thread.id, reference)
+      this.states.set(thread.id, { running: false, unread: 0 })
       this.threads.push(thread)
+      this.watchTurn(thread.id, thread.sessionId)
       this.notify()
       return thread
     } catch (error) {
@@ -167,9 +226,39 @@ class ThreadStore {
       try { reference.release() } catch { /* released twice */ }
       this.refs.delete(threadId)
     }
+    const stopWatching = this.watchers.get(threadId)
+    if (stopWatching !== undefined) {
+      stopWatching()
+      this.watchers.delete(threadId)
+    }
+    this.states.delete(threadId)
+    if (this.viewed === threadId) this.viewed = null
     const index = this.threads.findIndex((thread) => thread.id === threadId)
     if (index >= 0) this.threads.splice(index, 1)
     this.notify()
+  }
+
+  /**
+   * Follow a thread's turn so a completion can be badged even while the user is
+   * looking at another thread (or the panel is collapsed).
+   * @param threadId - local thread identity.
+   * @param sessionId - the thread's session.
+   */
+  private watchTurn(threadId: string, sessionId: string): void {
+    const observable = this.runningOf(sessionId)
+    let wasRunning = observable.getSnapshot()
+    const stop = observable.subscribe(() => {
+      const running = observable.getSnapshot()
+      const state = this.states.get(threadId) ?? { running: false, unread: 0 }
+      const finished = wasRunning && !running
+      wasRunning = running
+      this.states.set(threadId, {
+        running,
+        unread: finished && this.viewed !== threadId ? state.unread + 1 : state.unread,
+      })
+      this.notify()
+    })
+    this.watchers.set(threadId, stop)
   }
 
   /**
