@@ -66,7 +66,6 @@ function tick(): void {
     hideSuggestion()
     return
   }
-  if (current.hidePlaceholder) hidePlaceholders()
   paint()
 }
 
@@ -178,6 +177,11 @@ function paint(): boolean {
   // the panel. Restored to the stylesheet default as soon as it closes.
   sitBelowCover(el, box, painted.host)
   const style = window.getComputedStyle(card ?? painted.host)
+  // A cover with no layer of its own hides the hint (see occlusion.ts). The
+  // composer's placeholder then has to come back — an empty field with neither
+  // the hint nor the placeholder reads as a broken composer.
+  if (el.style.visibility === 'hidden') restorePlaceholders()
+  else if (painted.hidePlaceholder) hidePlaceholders()
   el.classList.toggle(`${CLASS}--pending`, painted.pending === true)
   const textEl = document.createElement('span')
   textEl.className = 'dsh-ph-suggest-text'
