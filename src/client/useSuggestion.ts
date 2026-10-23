@@ -19,12 +19,20 @@ import { getPrefs } from './prefs.ts'
 import { buildContext, getActiveBridge } from './suggest.ts'
 import { hideSuggestion, showPending, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
 
-/** The composer state the hook reads at event time. */
+/** The composer actions the hooks may call (all optional: hosts differ). */
+export interface ComposerActions {
+  captureInsertion?: () => unknown
+  /** The span is whatever the host's own captureInsertion() returned. */
+  insertText?: (text: string, span: never) => boolean
+  setDraft?: (text: string) => void
+}
+
+/** The composer state the hooks read at event time. */
 export interface LiveComposer {
   readonly draft: string
   readonly phase: string
   readonly removed: boolean
-  readonly inputActions: unknown
+  readonly inputActions: ComposerActions
 }
 
 /** What the composer must hand the hook each render. */
@@ -200,15 +208,11 @@ export function useSuggestion(input: SuggestionInput): SuggestionControls {
     if (predicted === null || predicted.text === '') return false
     const host = editorHost()
     if (host === null) return false
-    const actions = liveRef.current.inputActions as {
-      captureInsertion?: () => unknown
-      insertText?: (text: string, span: unknown) => boolean
-      setDraft?: (text: string) => void
-    }
+    const actions = liveRef.current.inputActions
     focusEditor(host)
     let inserted = false
     if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
-      try { inserted = actions.insertText(predicted.text, actions.captureInsertion()) === true } catch { inserted = false }
+      try { inserted = actions.insertText(predicted.text, actions.captureInsertion() as never) === true } catch { inserted = false }
     }
     if (!inserted) {
       actions.setDraft?.(predicted.text)
