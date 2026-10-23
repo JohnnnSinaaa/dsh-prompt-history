@@ -104,6 +104,23 @@ dsh plugin --profile web add dsh-prompt-history
 
 ## 开发
 
+### 自动化回归（E2E）
+
+```sh
+pnpm test:e2e     # 或 pnpm test（typecheck + e2e）
+```
+
+真实起一个 DSH Web 实例（临时端口）+ 无头 Chromium，逐条校验**已修复过的回归**：
+
+| 套件 | 固化内容 |
+|---|---|
+| `overlay` | 浮层与输入框内容区对齐 · 布局变化后跟随 · **打字时预测立即消失（叠字）** · **弹层覆盖时沉到其下（遮挡）** · 弹层关闭后回到原层 · 隐藏时恢复占位符 |
+| `composer` | ↑ 召最新 · ↓ 还原待发送行 · 前缀搜索 · 补全 ghost + Tab · Ctrl+R 搜索 · **输入框有焦点时引用仍读对话选区** · 会话目录条目 |
+| `sidechat` | 侧聊默认开启 · 设置项与桥接状态 · 面板打开并 fork 线程 · **关闭功能后工具条按钮消失** |
+
+细节与可配环境变量见 [`test/e2e/README.md`](test/e2e/README.md)。
+
+
 ```sh
 pnpm install
 pnpm run typecheck   # tsc --noEmit

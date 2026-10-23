@@ -19,7 +19,8 @@ import { SettingsSection } from './SettingsSection.tsx'
 import { NS, en, zh } from './locales.ts'
 import { setTranslator, T } from './i18n.ts'
 import { createBridge, mountContribution, setActiveBridge } from './suggest.ts'
-import { installSuggestStyle } from './suggestOverlay.ts'
+import { hideSuggestion, installSuggestStyle, showPending, showSuggestion } from './suggestOverlay.ts'
+import { hideGhost, showGhost } from './ghost.ts'
 import { bindSideChat } from './sideChat.tsx'
 import { bindRootContext } from './sessionCtx.ts'
 
@@ -116,6 +117,20 @@ export function apply(ctx: ClientContext): void {
   bindRootContext(ctx)
   // Style first: the suggestion overlay hides the composer's own placeholder.
   installSuggestStyle()
+
+  // Test seam: the E2E suite opts in through localStorage so the overlay
+  // regressions (stray ghost over typed text, ghost above a covering popup,
+  // geometry after a layout change) can be exercised deterministically without a
+  // model round-trip. Only the harness sets this key; users never get a global.
+  try {
+    if (window.localStorage.getItem('dsh-prompt-history.testSeam') === '1') {
+      Reflect.set(window, '__dshPhTest', {
+        showSuggestion, showPending, hideSuggestion, showGhost, hideGhost,
+        suggestionVisible: (): boolean => document.querySelector('.dsh-ph-suggest') !== null,
+        ghostVisible: (): boolean => document.querySelector('.dsh-ph-ghost') !== null,
+      })
+    }
+  } catch { /* storage unavailable: no seam */ }
 
   // Side chat rides the right sidebar: the toggle decides whether the tab type
   // and its body are registered at all.
