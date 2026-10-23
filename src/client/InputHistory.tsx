@@ -53,9 +53,9 @@ import {
 } from './editor.ts'
 import { matchCompletion } from './completion.ts'
 import { useClipboard } from './useClipboard.ts'
+import { useHistory } from './useHistory.ts'
 import { useCompletion } from './useCompletion.ts'
 import { RESET_BROWSE, type BrowseState, type SearchState } from './browse.ts'
-import { foldHistory, loadRing, saveRing } from './historyRing.ts'
 import { getActiveBridge } from './suggest.ts'
 import { useSuggestion } from './useSuggestion.ts'
 import { insertIntoMain, quoteBlock, registerMainInserter, sendToSideChat } from './bridge.ts'
@@ -169,6 +169,8 @@ export function InputHistory(props: InputHistoryProps) {
   const completion = useCompletion({ liveRef, historyRef, draft })
   // Clipboard: right-click paste, copy modes, selection toolbar, quote.
   useClipboard({ liveRef })
+  // History: seed/reset/fold the prompt list from the session's own messages.
+  useHistory({ sessionId, messages, historyRef, seenRef, browseRef, searchRef })
   liveRef.current = { draft, phase, removed, inputActions }
 
   // ---- prompt completion (Codex/fish-style type-ahead) ----
@@ -193,33 +195,6 @@ export function InputHistory(props: InputHistoryProps) {
     setEditorCaret(host, next.length)
     return true
   }), [])
-
-  // Seed the ring once on mount when the option is on.
-  useEffect(() => {
-    if (getPrefs().globalHistory && historyRef.current.length === 0) {
-      historyRef.current = loadRing()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Session switch: with global history the ring persists (only the transient
-  // browse/search state resets); otherwise a fresh per-session history.
-  useEffect(() => {
-    if (!getPrefs().globalHistory) historyRef.current = []
-    seenRef.current = new Set()
-    browseRef.current = RESET_BROWSE
-    searchRef.current = null
-    hideSearchOverlay()
-  }, [sessionId])
-
-  // Fold newly arrived user messages into the history (window slides; the
-  // append-only list survives it). With global history, dedup against the
-  // whole ring and persist it after every append.
-  useEffect(() => {
-    const globalOn = getPrefs().globalHistory
-    foldHistory({ messages, seen: seenRef.current, history: historyRef.current, globalOn })
-    if (globalOn) saveRing(historyRef.current)
-  }, [messages])
 
   // Any draft change that is not our own history write ends the browse
   // session (bash drops the recalled line when you edit it).
