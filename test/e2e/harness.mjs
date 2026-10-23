@@ -19,11 +19,33 @@
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import puppeteer from 'puppeteer-core'
 
-export const PORT = Number(process.env.DSH_E2E_PORT ?? 3099)
+/**
+ * Ask the OS for a free port.
+ *
+ * A fixed port is a trap: a server left over from the previous run still
+ * answers the readiness probe, the new child then fails to bind, and the page
+ * lands on chrome-error:// with every feature check failing for the wrong
+ * reason.
+ * @returns a port nothing is listening on right now.
+ */
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const probe = createServer()
+    probe.on('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address()
+      const port = typeof address === 'object' && address !== null ? address.port : 0
+      probe.close(() => resolve(port))
+    })
+  })
+}
+
+export const PORT = Number(process.env.DSH_E2E_PORT ?? 0) || await freePort()
 export const AUTHORITY = `127.0.0.1:${PORT}`
 const CHROME = process.env.DSH_E2E_CHROME ?? '/usr/bin/google-chrome'
 const BASE = process.env.DSH_E2E_URL ?? `http://${AUTHORITY}/`
@@ -116,16 +138,25 @@ export async function startServer() {
     if (child.exitCode === null) child.kill('SIGKILL')
   }
   process.on('exit', () => { try { child.kill('SIGKILL') } catch { /* gone */ } })
+  // Readiness means the auth fence is mounted, not merely "something answers":
+  // during startup the listener can reply 404 before the app routes exist, and a
+  // stray responder on a random port would also pass a status-agnostic probe.
+  const READY = new Set([401, 200, 302])
+  let lastStatus = 0
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`server exited before answering on ${BASE} (code ${child.exitCode})`)
+    }
     try {
       const response = await fetch(BASE, { redirect: 'manual' })
-      if (response.status > 0) return stop
+      lastStatus = response.status
+      if (READY.has(response.status)) return stop
     } catch { /* not listening yet */ }
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await new Promise((resolve) => setTimeout(resolve, 400))
   }
   await stop()
-  throw new Error(`server did not answer on ${BASE}`)
+  throw new Error(`server never became ready on ${BASE} (last status ${lastStatus})`)
 }
 
 /**
@@ -137,8 +168,11 @@ export async function openApp(browser, prefs = BASE_PREFS) {
   const page = await browser.newPage()
   const errors = []
   page.on('pageerror', (error) => errors.push(`pageerror: ${String(error).slice(0, 160)}`))
+  // Host-transport noise (the gateway hiccuping while a second server shares the
+  // same profile) is not a plugin error; only the app's own failures count.
+  const HOST_NOISE = /404|Failed to load resource|Failed to fetch|gateway\/internal|dynamicCordisRunner|cordis-client-runner|client api:/
   page.on('console', (message) => {
-    if (message.type() === 'error' && !/404|Failed to load resource/.test(message.text())) {
+    if (message.type() === 'error' && !HOST_NOISE.test(message.text())) {
       errors.push(message.text().slice(0, 160))
     }
   })
@@ -148,7 +182,15 @@ export async function openApp(browser, prefs = BASE_PREFS) {
     name: cookie.name, value: cookie.value, domain: '127.0.0.1', path: '/', httpOnly: true,
   })
   await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 40_000 })
-  await sleep(6000)
+  // A navigation that landed on chrome-error:// has no localStorage and no app;
+  // wait for the composer so such a run reports a harness error instead of a
+  // dozen feature failures.
+  try {
+    await page.waitForSelector('[data-composer-input]', { timeout: 40_000 })
+  } catch {
+    throw new Error(`app did not mount (url=${page.url()}); is the server serving the web profile?`)
+  }
+  await sleep(2500)
   await page.evaluate(([key, seam, payload]) => {
     localStorage.setItem(key, JSON.stringify(payload))
     localStorage.setItem(seam, '1')

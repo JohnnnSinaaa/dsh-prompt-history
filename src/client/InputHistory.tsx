@@ -41,22 +41,20 @@ import type { InputState } from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: the ui-session merge (useSession/sessionId) on DSH >= 0.2 layouts.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { getPrefs, subscribePrefs } from './prefs.ts'
-import { T } from './i18n.ts'
 import { pullOlderPage } from './sessionCtx.ts'
 import { promptMessage, type PromptMessage } from './nodes.ts'
 import {
   COMPOSER_CARD, editorFocused, editorHost, editorSelectedText, editorSelectionOffsets,
   focusEditor, isEditorTarget, setEditorCaret,
 } from './editor.ts'
-import { matchCompletion } from './completion.ts'
 import { useClipboard } from './useClipboard.ts'
 import { useHistory } from './useHistory.ts'
 import { useBrowse } from './useBrowse.ts'
+import { useComposerKeys } from './useComposerKeys.ts'
 import { useCompletion } from './useCompletion.ts'
 import { RESET_BROWSE, type BrowseState, type SearchState } from './browse.ts'
-import { getActiveBridge } from './suggest.ts'
+import { registerMainInserter } from './bridge.ts'
 import { useSuggestion } from './useSuggestion.ts'
-import { insertIntoMain, quoteBlock, registerMainInserter, sendToSideChat } from './bridge.ts'
 import { ChatToc } from './ChatToc.tsx'
 
 /** Full props of the input-history entry: framework standard kit + owner share. */
@@ -203,118 +201,9 @@ export function InputHistory(props: InputHistoryProps) {
     if (browse.index !== -1 && draft !== browse.lastSet) browseRef.current = RESET_BROWSE
   }, [draft])
 
-  // History keydown listener (mounts once; reads refs at event time):
-  // ↑/↓ browse (with bash-style prefix search when the draft is non-empty)
-  // and Ctrl+R incremental reverse search.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      const target = e.target
-      // The prediction belongs to the composer even when the caret wandered off
-      // (clicking around the page is normal while reading a suggestion): accept
-      // Tab or → anywhere except inside another text field.
-      const acceptKey = e.key === 'Tab' || e.key === 'ArrowRight'
-      if (acceptKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
-        && suggestion.visible() && liveRef.current.draft === '') {
-        const active = document.activeElement
-        const otherField = active instanceof HTMLElement
-          && active !== document.body
-          && active.closest(COMPOSER_CARD) === null
-          && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
-        if (!otherField) {
-          e.preventDefault()
-          e.stopPropagation()
-          suggestion.accept()
-          return
-        }
-      }
-      if (!isEditorTarget(target)) return
-      const card = (target as Element).closest(COMPOSER_CARD)
-      if (card === null) return
-      // IME composition stays native; the suggestion menu owns the keys.
-      if (e.isComposing || e.keyCode === 229) return
-      if (card.querySelector(OPEN_MENU) !== null) return
-      const live = liveRef.current
-      if (live.phase === 'adjudicating' || live.phase === 'submitting' || live.removed) return
-      const history = historyRef.current
-      // ---- Ctrl+R: start reverse search, or step to the older match ----
-      // Ctrl/Cmd+Shift+Space: predict now. The automatic pass only fires when an
-      // empty composer gains focus or a turn ends, so a dismissed (or slow)
-      // prediction otherwise has no way back.
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.code === 'Space' || e.key === ' ')) {
-        if (live.draft !== '' || live.phase !== 'plain' || live.removed) return
-        e.preventDefault()
-        e.stopPropagation()
-        suggestion.requestNow()
-        return
-      }
-      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
-        browsing.handleCtrlR(e)
-        return
-      }
-
-      // ---- active reverse search: typed keys feed the query ----
-      if (browsing.handleSearchKey(e)) return
-
-      // ---- context suggestion: Tab accepts the predicted next prompt ----
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        if (e.key === 'Escape' && suggestion.visible()) {
-          suggestion.dismiss()
-          return
-        }
-        if ((e.key === 'Tab' || e.key === 'ArrowRight') && live.draft === '' && suggestion.accept()) {
-          e.preventDefault()
-          e.stopPropagation()
-          return
-        }
-      }
-
-      // ---- prompt completion: Tab (or →) accepts the ghosted suffix ----
-      if (getPrefs().promptCompletion && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (e.key === 'Escape' && completion.visible()) {
-          completion.dismiss()
-          return
-        }
-        if ((e.key === 'Tab' || (e.key === 'ArrowRight' && !e.shiftKey)) && !e.shiftKey) {
-          const host = editorHost()
-          if (host !== null) {
-            const offsets = editorSelectionOffsets(host)
-            const atEnd = offsets !== null && offsets.start === live.draft.length && offsets.end === live.draft.length
-            if (atEnd) {
-              const suffix = matchCompletion(live.draft, history)
-              if (suffix !== null) {
-                e.preventDefault()
-                e.stopPropagation()
-                const actions = live.inputActions as {
-                  captureInsertion?: () => unknown
-                  insertText?: (text: string, span: unknown) => boolean
-                  setDraft?: (text: string) => void
-                }
-                let inserted = false
-                if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
-                  try { inserted = actions.insertText(suffix, actions.captureInsertion()) === true } catch { inserted = false }
-                }
-                if (!inserted) {
-                  // Legacy hosts (DSH <= 0.1.x) have no insertText: replace the
-                  // draft and park the caret after the accepted suffix.
-                  const full = live.draft + suffix
-                  actions.setDraft?.(full)
-                  setEditorCaret(host, full.length)
-                }
-                completion.sync()
-                return
-              }
-            }
-          }
-        }
-      }
-
-      // ---- arrow keys: prefix search (non-empty draft) or plain browse ----
-      // ---- arrow keys: prefix search (non-empty draft) or plain browse ----
-      browsing.handleArrow(e)
-    }
-    document.addEventListener('keydown', onKeyDown, true)
-    return () => { document.removeEventListener('keydown', onKeyDown, true) }
-  }, [])
+  // The key chain (prediction accept → IME/menu guards → manual predict →
+  // reverse search → hint accept → arrows), installed once.
+  useComposerKeys({ liveRef, historyRef, suggestion, completion, browsing })
 
   return prefs.tocVisible
     ? <ChatToc texts={tocTexts} onWiden={requestWiden} />

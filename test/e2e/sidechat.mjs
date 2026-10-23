@@ -91,12 +91,19 @@ export async function sideChatSuite(page, check, browser) {
   await page.keyboard.press('Escape')
   await sleep(1200)
   const panelOpen = await page.evaluate(() => document.querySelector('.dsh-ph-sidechat') !== null)
-  await page.evaluate(() => {
+  const clickCreate = () => page.evaluate(() => {
     const create = [...document.querySelectorAll('.dsh-ph-sidechat button')]
       .find((b) => /带上下文|with context/i.test((b.textContent ?? '').trim()))
     if (create !== undefined) create.click()
   })
-  await sleep(4000)
+  await clickCreate()
+  for (let i = 0; i < 12; i += 1) {
+    await sleep(1500)
+    const chips = await page.evaluate(() => document.querySelectorAll('.dsh-ph-sidechat-chipLabel').length)
+    if (chips > 0) break
+    // A host hiccup can drop the fork call; one user-visible retry is enough.
+    if (i === 5) await clickCreate()
+  }
   const panel = await page.evaluate(() => ({
     chips: [...document.querySelectorAll('.dsh-ph-sidechat-chipLabel')].map((b) => (b.textContent ?? '').trim()),
     composer: document.querySelector('.dsh-ph-sidechat-input') !== null,

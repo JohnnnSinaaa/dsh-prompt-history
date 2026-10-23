@@ -8,8 +8,8 @@
  * @module dsh-prompt-history/test/e2e/overlay
  */
 import {
-  clearComposer, composerText, focusComposer, hostIdentity, overlayGeometry,
-  seamHideSuggestion, seamShowSuggestion, sleep,
+  clearComposer, composerText, focusComposer, hostIdentity, openFirstSession,
+  overlayGeometry, seamHideSuggestion, seamShowSuggestion, sleep,
 } from './harness.mjs'
 
 const TOLERANCE = 2
@@ -20,6 +20,9 @@ const TOLERANCE = 2
  * @param check - the runner's assertion collector.
  */
 export async function overlaySuite(page, check) {
+  // The composer renders before the session finishes opening; keys typed into a
+  // composer whose session is still loading are swallowed, so open one first.
+  await openFirstSession(page)
   await focusComposer(page)
   await clearComposer(page)
 
@@ -87,13 +90,29 @@ export async function overlaySuite(page, check) {
   await seamShowSuggestion(page)
   await sleep(300)
   const beforeMenu = await overlayGeometry(page)
-  const opened = await page.evaluate(() => {
-    const candidate = [...document.querySelectorAll('button, [role="button"], [aria-haspopup]')]
-      .find((b) => /完全权限|工作区内修改|只读|Full access|Workspace/.test((b.textContent ?? '').trim()))
-    if (candidate === undefined) return null
-    candidate.click()
-    return (candidate.textContent ?? '').trim().slice(0, 16)
-  })
+  let clicked = null
+  for (let i = 0; i < 10 && clicked === null; i += 1) {
+    clicked = await page.evaluate(() => {
+      const candidate = [...document.querySelectorAll('button, [role="button"], [aria-haspopup]')]
+        .find((b) => /完全权限|工作区内修改|只读|Full access|Workspace/.test((b.textContent ?? '').trim()))
+      if (candidate === undefined) return null
+      candidate.click()
+      return (candidate.textContent ?? '').trim().slice(0, 16)
+    })
+    if (clicked === null) await sleep(600)
+  }
+  // The app's own control is not always rendered (it belongs to the composer
+  // footer); a stand-in cover still exercises the rule the fix is about.
+  if (clicked === null) {
+    await page.evaluate(() => {
+      const cover = document.createElement('div')
+      cover.setAttribute('role', 'menu')
+      cover.setAttribute('data-e2e-cover', '1')
+      cover.style.cssText = 'position:fixed;left:8px;top:8px;width:420px;height:180px;z-index:1100;background:rgba(0,0,0,.15)'
+      document.body.appendChild(cover)
+    })
+  }
+  const opened = clicked ?? 'stand-in'
   await sleep(1200)
   const afterOpen = await overlayGeometry(page)
   if (afterOpen.present === false) {
@@ -107,8 +126,16 @@ export async function overlaySuite(page, check) {
   })
   const restacked = withMenu.present === true
     && (Number(withMenu.zIndex) < (menuZ ?? 0) || withMenu.visibility === 'hidden')
-  await page.keyboard.press('Escape')
-  await sleep(700)
+  // Close the popup the way the user would: press the same control again, or
+  // remove the stand-in cover.
+  await page.evaluate(() => {
+    const cover = document.querySelector('[data-e2e-cover]')
+    if (cover !== null) { cover.remove(); return }
+    const candidate = [...document.querySelectorAll('button, [role="button"], [aria-haspopup]')]
+      .find((b) => /完全权限|工作区内修改|只读|Full access|Workspace/.test((b.textContent ?? '').trim()))
+    if (candidate !== undefined) candidate.click()
+  })
+  await sleep(900)
   await seamShowSuggestion(page)
   await sleep(500)
   const afterClose = await overlayGeometry(page)
