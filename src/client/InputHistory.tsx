@@ -51,40 +51,17 @@ import {
   COMPOSER_CARD, editorFocused, editorHost, editorSelectedText, editorSelectionOffsets,
   focusEditor, isEditorTarget, setEditorCaret,
 } from './editor.ts'
-import { completionEligible, matchCompletion } from './completion.ts'
-import { ghostVisible, hideGhost, showGhost } from './ghost.ts'
-import { buildContext, getActiveBridge } from './suggest.ts'
+import { matchCompletion } from './completion.ts'
+import { useCompletion } from './useCompletion.ts'
+import { RESET_BROWSE, type BrowseState, type SearchState } from './browse.ts'
+import { foldHistory, loadRing, saveRing } from './historyRing.ts'
+import { getActiveBridge } from './suggest.ts'
+import { useSuggestion } from './useSuggestion.ts'
 import { insertIntoMain, quoteBlock, registerMainInserter, sendToSideChat } from './bridge.ts'
-import { hideSuggestion, showPending, showSuggestion, suggestionVisible } from './suggestOverlay.ts'
 import { ChatToc } from './ChatToc.tsx'
 
 /** Full props of the input-history entry: framework standard kit + owner share. */
 export type InputHistoryProps = PropsRuntime<'conversation.input.right'>
-
-/** One browse-position snapshot; index -1 = showing the live draft (not browsing). */
-interface BrowseState {
-  /** History index currently shown; -1 = the live line. */
-  readonly index: number
-  /** The draft saved when browsing started; restored at the bottom edge. */
-  readonly saved: string
-  /** The exact draft our own setDraft last wrote (user-edit detection). */
-  readonly lastSet: string | null
-  /** Present only in prefix-search mode: the prefix that anchors the matches. */
-  readonly prefix?: string
-}
-
-/** One active Ctrl+R reverse-search session (null = not searching). */
-interface SearchState {
-  /** The draft before the search started (restored on Escape). */
-  readonly preSearch: string
-  /** The incremental query typed so far. */
-  readonly query: string
-  /** History index of the currently displayed match (-1 = no match). */
-  readonly matchIndex: number
-}
-
-/** Not-browsing state; also the reset target after edits and session switches. */
-const RESET_BROWSE: BrowseState = { index: -1, saved: '', lastSet: null }
 
 /** The suggestion menu (slash/at) renders a listbox inside the card while open. */
 const OPEN_MENU = '[role="listbox"]'
@@ -182,37 +159,17 @@ export function InputHistory(props: InputHistoryProps) {
   const browseRef = useRef<BrowseState>(RESET_BROWSE)
   const searchRef = useRef<SearchState | null>(null)
   const liveRef = useRef({ draft, phase, removed, inputActions })
+  /** Settings snapshot: the TOC render and the leaf flags follow it. */
+  const prefs = useSyncExternalStore(subscribePrefs, getPrefs)
+
+  // Prediction lifecycle (cache, dismissal, debounce, pending line, accept).
+  const suggestion = useSuggestion({ sessionId, liveRef, draft, phase, messagesLength: messages.length })
+  // History-completion ghost (suffix of a past prompt after the caret).
+  const completion = useCompletion({ liveRef, historyRef, draft })
   liveRef.current = { draft, phase, removed, inputActions }
 
   // ---- prompt completion (Codex/fish-style type-ahead) ----
   /** Draft the user dismissed the ghost on (Esc); cleared whenever it changes. */
-  const dismissedRef = useRef<string | null>(null)
-  const prefs = useSyncExternalStore(subscribePrefs, getPrefs)
-
-  /**
-   * Recompute the ghost from the live draft + caret. Cheap (a backward scan
-   * over the history ring) and idempotent, so it can be driven from any event
-   * that may have moved the caret or changed the draft.
-   */
-  const syncCompletion = useCallback((): void => {
-    if (!getPrefs().promptCompletion) { hideGhost(); return }
-    const host = editorHost()
-    if (host === null) { hideGhost(); return }
-    const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
-    if (card !== null && card.querySelector(OPEN_MENU) !== null) { hideGhost(); return }
-    const live = liveRef.current
-    if (live.phase === 'adjudicating' || live.phase === 'submitting' || live.removed) { hideGhost(); return }
-    const current = live.draft
-    if (!completionEligible(current)) { hideGhost(); return }
-    if (dismissedRef.current === current) { hideGhost(); return }
-    // Only complete from the end of the draft: mid-line edits stay untouched.
-    const offsets = editorSelectionOffsets(host)
-    if (offsets === null || offsets.start !== current.length || offsets.end !== current.length) { hideGhost(); return }
-    const suffix = matchCompletion(current, historyRef.current)
-    if (suffix === null) { hideGhost(); return }
-    showGhost(suffix, host)
-  }, [])
-
   // Let the side chat hand a conclusion back into this composer's draft.
   useEffect(() => registerMainInserter((text) => {
     const host = editorHost()
@@ -233,205 +190,6 @@ export function InputHistory(props: InputHistoryProps) {
     setEditorCaret(host, next.length)
     return true
   }), [])
-
-  // Any draft change re-arms the ghost (a dismissed ghost must not stick).
-  useEffect(() => { dismissedRef.current = null }, [draft])
-
-  // ---- context suggestion (Codex-style predicted next prompt) ----
-  /** Last prediction, keyed by session + context so it never crosses sessions. */
-  const suggestRef = useRef<{ key: string; text: string } | null>(null)
-  /** Context the user dismissed with Escape (suppressed until it changes). */
-  const suggestDismissedRef = useRef<string | null>(null)
-  const suggestAbortRef = useRef<AbortController | null>(null)
-  const suggestTimerRef = useRef<number | null>(null)
-  /** One attempt chain at a time: overlapping triggers would cancel each other. */
-  const suggestPendingRef = useRef(false)
-  /** Empty model answers already retried for the current context. */
-  const emptyTriesRef = useRef(0)
-
-  /** Stop any scheduled or in-flight prediction and drop the overlay. */
-  const clearSuggestion = useCallback((): void => {
-    if (suggestTimerRef.current !== null) {
-      window.clearTimeout(suggestTimerRef.current)
-      suggestTimerRef.current = null
-    }
-    suggestAbortRef.current?.abort()
-    suggestAbortRef.current = null
-    suggestPendingRef.current = false
-    hideSuggestion()
-  }, [])
-
-  /**
-   * Predict the next prompt from the conversation and ghost it in the
-   * (empty) composer. Cached per context, debounced, and cancelled by any
-   * draft change or submit.
-   */
-  const requestSuggestion = useCallback((): void => {
-    const live0 = liveRef.current
-    if (!getPrefs().contextSuggest) { clearSuggestion(); return }
-    const live = liveRef.current
-    if (live.draft !== '' || live.phase !== 'plain' || live.removed) { clearSuggestion(); return }
-    if (suggestPendingRef.current || suggestionVisible()) return
-    const bridge = getActiveBridge()
-    if (bridge === null) return
-    const host = editorHost()
-    if (host === null) return
-    suggestPendingRef.current = true
-    const controller = new AbortController()
-    suggestAbortRef.current = controller
-    let attempts = 0
-    // Wait for the frame to settle before reading the conversation: node
-    // updates arrive before React paints the chat rows, so an immediate read
-    // would see an empty transcript. Empty reads retry cheaply — no model call
-    // happens until there is context.
-    const attempt = (): void => {
-      suggestTimerRef.current = null
-      const now = liveRef.current
-      if (controller.signal.aborted || now.draft !== '' || now.phase !== 'plain' || now.removed) {
-        suggestPendingRef.current = false
-        return
-      }
-      let context = ''
-      try {
-        context = buildContext()
-      } catch (error) {
-        suggestPendingRef.current = false
-        return
-      }
-      if (context.trim() === '') {
-        // Nothing readable yet (fresh session): never keep another context's
-        // prediction on screen while we wait for rows to render.
-        hideSuggestion()
-        attempts += 1
-        // A freshly opened session can take a while to paint its rows; empty
-        // reads cost nothing, so keep watching for up to ~24s.
-        if (attempts < 20) suggestTimerRef.current = window.setTimeout(attempt, 1200)
-        else suggestPendingRef.current = false
-        return
-      }
-      if (suggestDismissedRef.current === context) { suggestPendingRef.current = false; return }
-      const key = `${sessionId}:${context.slice(-600)}`
-      if (suggestRef.current?.key !== key) emptyTriesRef.current = 0
-      const cached = suggestRef.current
-      if (cached !== null && cached.key === key) {
-        suggestPendingRef.current = false
-        if (cached.text !== '') showSuggestion(cached.text, T('suggest.accept'), host)
-        return
-      }
-      // Tell the user something is happening; the prediction replaces this line.
-      showPending(T('suggest.pending'), host)
-      void bridge.fetch(context, controller.signal).then((text) => {
-        suggestPendingRef.current = false
-        if (controller.signal.aborted) return
-        const latest = liveRef.current
-        if (latest.draft !== '' || latest.phase !== 'plain' || latest.removed) return
-        // An empty answer must not hide a suggestion that is already on screen,
-        // and must not be cached: a later turn can still produce one. Reasoning
-        // models occasionally spend the whole budget thinking, so one silent
-        // retry is allowed per context before giving up on it.
-        if (text === '') {
-          hideSuggestion()
-          if (emptyTriesRef.current < 2) {
-            emptyTriesRef.current += 1
-            attempt()
-          }
-          return
-        }
-        emptyTriesRef.current = 0
-        suggestRef.current = { key, text }
-        showSuggestion(text, T('suggest.accept'), host)
-      })
-    }
-    suggestTimerRef.current = window.setTimeout(attempt, 300)
-  }, [clearSuggestion])
-
-  // A suggestion belongs to one conversation: switching sessions (or starting a
-  // new one) must drop it immediately instead of showing the previous session's
-  // prediction in every view.
-  useEffect(() => {
-    suggestRef.current = null
-    suggestDismissedRef.current = null
-    emptyTriesRef.current = 0
-    clearSuggestion()
-  }, [sessionId, clearSuggestion])
-
-  // Triggers: the empty composer gaining focus, and each turn that just ended.
-  useEffect(() => {
-    const card = document.querySelector(COMPOSER_CARD)
-    if (card === null) return
-    const onFocusIn = (event: Event): void => {
-      if (!isEditorTarget(event.target)) return
-      requestSuggestion()
-    }
-    card.addEventListener('focusin', onFocusIn)
-    // Any edit means the composer is no longer empty: drop the suggestion at the
-    // DOM level so it can never be painted over what the user is typing.
-    const onEdit = (): void => { clearSuggestion() }
-    card.addEventListener('beforeinput', onEdit, true)
-    card.addEventListener('input', onEdit, true)
-    card.addEventListener('paste', onEdit, true)
-    // Conversation rows render after the node update; observing the scrollport
-    // is what makes a freshly opened session (and every finished turn) predict.
-    const scrollport = document.querySelector('[data-conversation-scroll]') ?? document.body
-    const observer = new MutationObserver(() => { requestSuggestion() })
-    observer.observe(scrollport, { childList: true, subtree: true, characterData: true })
-    return () => {
-      card.removeEventListener('focusin', onFocusIn)
-      card.removeEventListener('beforeinput', onEdit, true)
-      card.removeEventListener('input', onEdit, true)
-      card.removeEventListener('paste', onEdit, true)
-      observer.disconnect()
-    }
-  }, [requestSuggestion, clearSuggestion])
-
-  // The composer being empty and the session idle is the precondition; the
-  // effect also re-runs whenever conversation nodes arrive (a freshly opened
-  // session renders its messages after mount, and each turn adds nodes), which
-  // is exactly when a fresh prediction makes sense. The cache keeps this to at
-  // most one model call per context.
-  useEffect(() => {
-    if (draft !== '') {
-      clearSuggestion()
-      return
-    }
-    if (phase === 'plain') requestSuggestion()
-    else clearSuggestion()
-  }, [draft, phase, messages.length, clearSuggestion, requestSuggestion])
-  useEffect(() => {
-    syncCompletion()
-    // Caret moves (arrow keys, clicks, selection), layout shifts and scrolls all
-    // move the ghost's anchor without changing the draft.
-    document.addEventListener('selectionchange', syncCompletion)
-    window.addEventListener('resize', syncCompletion)
-    window.addEventListener('scroll', syncCompletion, true)
-    return () => {
-      document.removeEventListener('selectionchange', syncCompletion)
-      window.removeEventListener('resize', syncCompletion)
-      window.removeEventListener('scroll', syncCompletion, true)
-      hideGhost()
-    }
-  }, [syncCompletion, draft, messages, prefs.promptCompletion])
-
-  // Cross-session history ring: when the setting is on, the history persists
-  // in localStorage (capped), survives reloads and session switches, and is
-  // deduplicated against the whole ring instead of only consecutive entries.
-  const RING_KEY = 'dsh-prompt-history.global'
-  const RING_CAP = 200
-  const loadRing = (): string[] => {
-    try {
-      const raw = localStorage.getItem(RING_KEY)
-      if (raw === null) return []
-      const parsed = JSON.parse(raw) as unknown
-      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
-    } catch {
-      return []
-    }
-  }
-  const saveRing = (history: readonly string[]): void => {
-    try {
-      localStorage.setItem(RING_KEY, JSON.stringify(history.slice(-RING_CAP)))
-    } catch { /* storage unavailable */ }
-  }
 
   // Seed the ring once on mount when the option is on.
   useEffect(() => {
@@ -455,17 +213,8 @@ export function InputHistory(props: InputHistoryProps) {
   // append-only list survives it). With global history, dedup against the
   // whole ring and persist it after every append.
   useEffect(() => {
-    const seen = seenRef.current
-    const history = historyRef.current
     const globalOn = getPrefs().globalHistory
-    for (const message of messages) {
-      if (seen.has(message.seq)) continue
-      seen.add(message.seq)
-      if (message.text === null) continue
-      if (globalOn ? !history.includes(message.text) : history[history.length - 1] !== message.text) {
-        history.push(message.text)
-      }
-    }
+    foldHistory({ messages, seen: seenRef.current, history: historyRef.current, globalOn })
     if (globalOn) saveRing(historyRef.current)
   }, [messages])
 
@@ -475,36 +224,6 @@ export function InputHistory(props: InputHistoryProps) {
     const browse = browseRef.current
     if (browse.index !== -1 && draft !== browse.lastSet) browseRef.current = RESET_BROWSE
   }, [draft])
-
-  /**
-   * Accept the visible prediction: focus the composer, insert the text through
-   * the official insertion pair (falling back to a draft write), and drop the
-   * overlay. Safe to call from anywhere — a missing editor simply does nothing.
-   * @returns whether something was accepted.
-   */
-  const acceptSuggestion = useCallback((): boolean => {
-    const predicted = suggestRef.current
-    if (predicted === null || predicted.text === '') return false
-    const host = editorHost()
-    if (host === null) return false
-    const actions = liveRef.current.inputActions as {
-      captureInsertion?: () => unknown
-      insertText?: (text: string, span: unknown) => boolean
-      setDraft?: (text: string) => void
-    }
-    focusEditor(host)
-    let inserted = false
-    if (typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
-      try { inserted = actions.insertText(predicted.text, actions.captureInsertion()) === true } catch { inserted = false }
-    }
-    if (!inserted) {
-      actions.setDraft?.(predicted.text)
-      setEditorCaret(host, predicted.text.length)
-    }
-    clearSuggestion()
-    dismissedRef.current = null
-    return true
-  }, [clearSuggestion])
 
   // History keydown listener (mounts once; reads refs at event time):
   // ↑/↓ browse (with bash-style prefix search when the draft is non-empty)
@@ -517,7 +236,7 @@ export function InputHistory(props: InputHistoryProps) {
       // Tab or → anywhere except inside another text field.
       const acceptKey = e.key === 'Tab' || e.key === 'ArrowRight'
       if (acceptKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
-        && suggestionVisible() && liveRef.current.draft === '' && suggestRef.current !== null) {
+        && suggestion.visible() && liveRef.current.draft === '') {
         const active = document.activeElement
         const otherField = active instanceof HTMLElement
           && active !== document.body
@@ -526,7 +245,7 @@ export function InputHistory(props: InputHistoryProps) {
         if (!otherField) {
           e.preventDefault()
           e.stopPropagation()
-          acceptSuggestion()
+          suggestion.accept()
           return
         }
       }
@@ -559,10 +278,7 @@ export function InputHistory(props: InputHistoryProps) {
         if (live.draft !== '' || live.phase !== 'plain' || live.removed) return
         e.preventDefault()
         e.stopPropagation()
-        suggestDismissedRef.current = null
-        suggestPendingRef.current = false
-        hideSuggestion()
-        requestSuggestion()
+        suggestion.requestNow()
         return
       }
       if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
@@ -651,12 +367,11 @@ export function InputHistory(props: InputHistoryProps) {
 
       // ---- context suggestion: Tab accepts the predicted next prompt ----
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        if (e.key === 'Escape' && suggestionVisible()) {
-          suggestDismissedRef.current = buildContext()
-          clearSuggestion()
+        if (e.key === 'Escape' && suggestion.visible()) {
+          suggestion.dismiss()
           return
         }
-        if ((e.key === 'Tab' || e.key === 'ArrowRight') && live.draft === '' && suggestionVisible() && acceptSuggestion()) {
+        if ((e.key === 'Tab' || e.key === 'ArrowRight') && live.draft === '' && suggestion.accept()) {
           e.preventDefault()
           e.stopPropagation()
           return
@@ -665,9 +380,8 @@ export function InputHistory(props: InputHistoryProps) {
 
       // ---- prompt completion: Tab (or →) accepts the ghosted suffix ----
       if (getPrefs().promptCompletion && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (e.key === 'Escape' && ghostVisible()) {
-          dismissedRef.current = live.draft
-          hideGhost()
+        if (e.key === 'Escape' && completion.visible()) {
+          completion.dismiss()
           return
         }
         if ((e.key === 'Tab' || (e.key === 'ArrowRight' && !e.shiftKey)) && !e.shiftKey) {
@@ -696,8 +410,7 @@ export function InputHistory(props: InputHistoryProps) {
                   actions.setDraft?.(full)
                   setEditorCaret(host, full.length)
                 }
-                dismissedRef.current = null
-                hideGhost()
+                completion.sync()
                 return
               }
             }

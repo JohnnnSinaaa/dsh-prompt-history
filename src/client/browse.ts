@@ -36,13 +36,23 @@ export interface BrowseState {
   /** The draft the user had before browsing started. */
   readonly saved: string
   /** The line this plugin last wrote (so an edit ends browsing). */
-  readonly lastSet: string
+  readonly lastSet: string | null
   /** The prefix that started a prefix search, when there was one. */
   readonly prefix?: string
 }
 
 /** Not browsing. */
-export const RESET_BROWSE: BrowseState = { index: -1, saved: '', lastSet: '' }
+export const RESET_BROWSE: BrowseState = { index: -1, saved: '', lastSet: null }
+
+/** One active Ctrl+R reverse-search session (null = not searching). */
+export interface SearchState {
+  /** The draft before the search started (restored on Escape). */
+  readonly preSearch: string
+  /** The incremental query typed so far. */
+  readonly query: string
+  /** History index of the currently displayed match (-1 = no match). */
+  readonly matchIndex: number
+}
 
 /**
  * Step one position through the matches of a prefix search.
