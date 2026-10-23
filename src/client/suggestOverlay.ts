@@ -169,6 +169,14 @@ function paint(): boolean {
   const painted = current
   const el = node
   if (painted === null || el === null) return false
+  // The composer gained real text after this prediction was drawn (typing, a
+  // paste, an accepted completion, an IME commit). The repaint must not put the
+  // ghost back on top of the user's own input — this runs on the tick, so a
+  // missed React effect can no longer leave the two layered together.
+  if (editorText(painted.host).trim() !== '') {
+    hideSuggestion()
+    return false
+  }
   const box = editorBox(painted.host)
   if (box === null) return false
   const card = document.querySelector<HTMLElement>(COMPOSER_CARD)
